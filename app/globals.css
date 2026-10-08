@@ -1,26 +1,261 @@
+/* ============================================
+   Ryugen Portfolio — Minimal Masonry Design (Dark Mode)
+   ============================================ */
+
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-color: #08080a; /* 極めて深い黒（漆黒に近い） */
+  --text-primary: #ffffff;
+  --text-secondary: #888899;
+  --text-muted: #555566;
+  
+  --accent: #00d4ff; /* サイバー感のあるブルーアクセント */
+  --card-bg: #101014;
+  --border-color: rgba(255, 255, 255, 0.05);
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+  padding: 4vw; /* 全体の余白 */
+  overflow-y: scroll; /* スクロールバー分のガタつき防止 */
+}
+
+/* ============================================
+   Masonry Grid Layout (CSS Columns)
+   ============================================ */
+.masonry-grid {
+  column-count: 1;
+  column-gap: 2vw;
+  width: 100%;
+  max-width: 2400px;
+  margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+  .masonry-grid {
+    column-count: 2;
+  }
+}
+
+@media (min-width: 1200px) {
+  .masonry-grid {
+    column-count: 3;
+  }
+}
+
+.masonry-item {
+  break-inside: avoid;
+  margin-bottom: 2vw;
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+/* ============================================
+   Image Card
+   ============================================ */
+.work-card {
+  display: block;
+  width: 100%;
+  position: relative;
+  cursor: pointer;
+  background-color: var(--card-bg);
+}
+
+.work-image-container {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  /* 画像の高さは元の比率に依存するため、ここでは高さを指定しない */
+}
+
+.work-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.work-card:hover .work-img {
+  transform: scale(1.03);
+}
+
+/* メタデータ（ホバー時に少し浮かび上がる） */
+.work-meta {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 32px 24px 24px;
+  background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.work-card:hover .work-meta {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.work-title {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.work-info {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ============================================
+   Text Cards (Profile, Specs, Links)
+   ============================================ */
+.text-card {
+  background-color: var(--card-bg);
+  padding: 48px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* プロフィールカード */
+.profile-card {
+  /* 背景に微かなサイバーグリッドを配置して個性を出す */
+  background-image: 
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.profile-name {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 8px;
+  line-height: 1.1;
+}
+
+.profile-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 32px;
+}
+
+.profile-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 400px;
+  margin-bottom: 32px;
+}
+
+/* リンク集 */
+.links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+}
+
+.link-item a {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  text-decoration: none;
+  letter-spacing: 1px;
+  transition: color 0.3s ease;
+  position: relative;
+}
+
+.link-item a::before {
+  content: "→";
+  margin-right: 8px;
+  color: var(--text-muted);
+  transition: color 0.3s ease, transform 0.3s ease;
+}
+
+.link-item a:hover {
+  color: var(--accent);
+}
+
+.link-item a:hover::before {
+  color: var(--accent);
+  transform: translateX(3px);
+}
+
+/* スペックカード (ターミナル風) */
+.specs-card {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 2;
+}
+
+.specs-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+}
+
+.spec-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.spec-key {
+  color: var(--text-muted);
+}
+.spec-val {
+  color: var(--text-primary);
+}
+
+/* ============================================
+   Header / Logo
+   ============================================ */
+.site-header {
+  position: fixed;
+  top: 4vw;
+  left: 4vw;
+  z-index: 100;
+  mix-blend-mode: difference; /* 画像と重なっても読めるように */
+  pointer-events: none;
+}
+
+.site-logo {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #fff;
+  margin: 0;
 }
