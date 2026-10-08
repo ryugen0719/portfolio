@@ -1,31 +1,27 @@
-import { Inter, JetBrains_Mono } from "next/font/google";
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({
   subsets: ["latin"],
+  display: "swap",
   variable: "--font-inter",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains",
-});
-
 export const metadata: Metadata = {
-  title: "Ryugen — Creative Developer / 3D Artist",
+  title: "Ryugen | Creative Portfolio",
   description:
-    "Portfolio of Ryugen — Creative Developer and 3D Artist. Blender, Game Development, and more.",
-  keywords: ["Ryugen", "Portfolio", "Blender", "3D Artist", "Game Developer"],
+    "Ryugenのポートフォリオ — ゲーム開発、クリエイティブコーディング、Webプロジェクトの作品集",
+  keywords: ["portfolio", "game dev", "creative coding", "Ryugen"],
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="ja" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="ja" className={inter.variable}>
       <body>{children}</body>
     </html>
   );
