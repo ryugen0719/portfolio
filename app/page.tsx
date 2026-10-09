@@ -1,204 +1,32 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Image from "next/image";
+import { GridItem } from "./types";
+import { gridLayout, itemsRegistry } from "./data";
+import { CellContent } from "./components/InfoBlocks";
 
 /* ════════════════════════════════════════════
-   Types
+   Grid Generation Logic
    ════════════════════════════════════════════ */
-type ProjectItem = {
-  type: "project";
-  title: string;
-  description: string;
-  image: string;
-  tags: { label: string; color: string }[];
-  category: string;
-  link: string;
-  size?: "normal" | "wide" | "tall" | "large";
-};
+const gridItems: GridItem[] = [];
+const seenKeys = new Set<string>();
 
-type StatItem = { type: "stat"; number: string; label: string };
-type InfoItem = {
-  type: "about" | "links" | "specs" | "skills" | "status" | "quote" | "brand" | "empty";
-};
+for (let r = 0; r < gridLayout.length; r++) {
+  for (let c = 0; c < gridLayout[r].length; c++) {
+    const id = gridLayout[r][c];
+    if (id === "empty") {
+      gridItems.push({ type: "empty" });
+    } else if (!seenKeys.has(id)) {
+      seenKeys.add(id);
+      gridItems.push(itemsRegistry[id] || { type: "empty" });
+    } else {
+      // 既に配置された要素の結合部分は empty（空間のプレースホルダー）として扱う
+      gridItems.push({ type: "empty" });
+    }
+  }
+}
 
-type GridItem = ProjectItem | StatItem | InfoItem;
-
-/* ════════════════════════════════════════════
-   Data
-   ════════════════════════════════════════════ */
-const projects: ProjectItem[] = [
-  {
-    type: "project",
-    title: "Candy 3D",
-    description: "Blenderで制作したポップなキャンディの3Dアート。",
-    image: "/works/blender/CANDY.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "3D Art", color: "pink" }],
-    category: "3D",
-    link: "#",
-    size: "large", // 2x2
-  },
-  {
-    type: "project",
-    title: "Umbrella",
-    description: "和傘をモチーフにした3Dモデリングとライティングの習作。",
-    image: "/works/blender/傘.png",
-    tags: [{ label: "Blender", color: "orange" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Abstract Cube",
-    description: "幾何学的なキューブの抽象的な表現。",
-    image: "/works/blender/cube2.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "Abstract", color: "green" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Room 0001",
-    description: "室内風景の3Dモデリング。光と影の演出。",
-    image: "/works/blender/0001.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "Interior", color: "" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Photography #1",
-    description: "日常の風景を切り取った一枚。",
-    image: "/works/photo/_IMG0083.jpg",
-    tags: [{ label: "Photo", color: "pink" }],
-    category: "Photography",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Photography #2",
-    description: "光と構図を意識した写真作品。",
-    image: "/works/photo/_IMG0144.jpg",
-    tags: [{ label: "Photo", color: "pink" }],
-    category: "Photography",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Photography #3",
-    description: "風景のスナップショット。",
-    image: "/works/photo/_IMG0174.jpg",
-    tags: [{ label: "Photo", color: "pink" }, { label: "Landscape", color: "green" }],
-    category: "Photography",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Neon Cube",
-    description: "ネオンカラーを基調としたキューブのレンダリング。",
-    image: "/works/blender/36.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "Neon", color: "cyan" }],
-    category: "3D",
-    link: "#",
-    size: "wide", // 2x1
-  },
-  {
-    type: "project",
-    title: "Color Adjust",
-    description: "3Dレンダリング後の合成と色調整のテスト。",
-    image: "/works/blender/合成色調整.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "Compositing", color: "pink" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Photography #4",
-    description: "自然の風景写真。",
-    image: "/works/photo/IMG20260405132205.jpg",
-    tags: [{ label: "Photo", color: "pink" }, { label: "Nature", color: "green" }],
-    category: "Photography",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Lighting Test",
-    description: "3D空間におけるライティングの実験。",
-    image: "/works/blender/Light.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "Lighting", color: "cyan" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Room 0420",
-    description: "3Dで構築されたインテリアデザイン。",
-    image: "/works/blender/0420.png",
-    tags: [{ label: "Blender", color: "orange" }, { label: "Design", color: "" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Testing 45",
-    description: "モデリングのテストショット。",
-    image: "/works/blender/45.png",
-    tags: [{ label: "Blender", color: "orange" }],
-    category: "3D",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Photography #5",
-    description: "被写界深度を活かした写真。",
-    image: "/works/photo/_IMG0184.jpg",
-    tags: [{ label: "Photo", color: "pink" }],
-    category: "Photography",
-    link: "#",
-  },
-  {
-    type: "project",
-    title: "Room 0006",
-    description: "別アングルからの室内レンダリング。",
-    image: "/works/blender/0006.png",
-    tags: [{ label: "Blender", color: "orange" }],
-    category: "3D",
-    link: "#",
-  },
-];
-
-const socialLinks = [
-  { name: "YouTube", handle: "@ryugen0719", url: "https://www.youtube.com/@ryugen0719", icon: "▶", cls: "yt" },
-  { name: "Scratch", handle: "ryugen0719", url: "https://scratch.mit.edu/users/ryugen0719/", icon: "🐱", cls: "sc" },
-  { name: "Instagram", handle: "@ryugen0719", url: "https://www.instagram.com/ryugen0719/", icon: "📷", cls: "ig" },
-  { name: "itch.io", handle: "ryugen0719", url: "https://ryugen0719.itch.io/", icon: "🎮", cls: "it" },
-  { name: "GitHub", handle: "ryugen0719", url: "https://github.com/ryugen0719", icon: "⚙", cls: "gh" },
-];
-
-const pcSpecs = [
-  { label: "CPU", value: "i7-14700F" },
-  { label: "RAM", value: "DDR4 32GB" },
-  { label: "GPU", value: "RTX 4060 Ti" },
-  { label: "SSD", value: "1TB" },
-  { label: "OS", value: "Win 11" },
-];
-
-const skills = [
-  "JavaScript", "TypeScript", "React", "Next.js",
-  "Scratch", "Unity", "C#", "HTML/CSS",
-  "Python", "Blender", "Git", "Node.js",
-];
-
-/* ── Grid Items: 5 columns × 5 rows = 25 cells ── */
-const gridItems: GridItem[] = [
-  /* row 0 */ projects[0], { type: "empty" },    { type: "about" }, projects[1],       projects[2],
-  /* row 1 */ { type: "empty" }, { type: "empty" }, projects[3],    projects[4],       projects[5],
-  /* row 2 */ projects[6], { type: "brand" },    { type: "empty" }, projects[7],       { type: "empty" },
-  /* row 3 */ { type: "skills" }, projects[8],   projects[9],       { type: "specs" }, projects[10],
-  /* row 4 */ projects[11], projects[12],        { type: "quote" }, projects[13],      projects[14],
-];
-
-const COLS = 5;
+const COLS = gridLayout[0].length;
 const ROWS = Math.ceil(gridItems.length / COLS);
 const CELL_W = 310;
 const CELL_H = 250;
@@ -223,6 +51,7 @@ function mod(n: number, m: number): number {
 export default function PortfolioPage() {
   /* ── State ── */
   const [mounted, setMounted] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [, setTick] = useState(0);        // forces re-render
   const [isDragging, setIsDragging] = useState(false);
   const [hintVisible, setHintVisible] = useState(true);
@@ -251,7 +80,15 @@ export default function PortfolioPage() {
     };
     setTick((t) => t + 1);
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+
+    const loadingTimer = setTimeout(() => {
+      setIsLoaded(true);
+    }, 1200);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      clearTimeout(loadingTimer);
+    };
   }, []);
 
   /* ── Wheel ── */
@@ -421,200 +258,63 @@ export default function PortfolioPage() {
     }
   }
 
-  if (!mounted) return null;
-
   return (
     <>
-      {/* Background layers */}
-      <div className="canvas-bg" />
-      <div className="canvas-grid-tex" />
-
-      {/* Vignette overlay for edge darkening */}
-      <div className="vignette" />
-
-      {/* Scroll hint */}
-      <div className={`scroll-hint ${hintVisible ? "" : "hidden"}`}>
-        <span className="scroll-hint__arrows">↕ ↔</span>
-        Scroll or drag to explore
-      </div>
-
-      {/* Canvas */}
-      <div
-        ref={canvasRef}
-        className={`infinite-canvas${isDragging ? " is-dragging" : ""}`}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        id="infinite-canvas"
-      >
-        <div className="cell-layer">
-          {visibleCells.map(({ key, item, x, y, w, h, scale, opacity }) => (
-            <div
-              key={key}
-              className="canvas-cell"
-              style={{
-                width: w,
-                height: h,
-                transform: `translate(${x}px, ${y}px) scale(${scale})`,
-                opacity,
-              }}
-            >
-              <CellContent item={item} />
-            </div>
-          ))}
+      {/* Loading Screen */}
+      <div className={`loading-screen ${isLoaded ? "is-hidden" : ""}`}>
+        <div className="loading-text">RYUGEN</div>
+        <div className="loading-bar-container">
+          <div className="loading-bar" />
         </div>
       </div>
+
+      {mounted && (
+        <>
+          {/* Background layers */}
+          <div className="canvas-bg" />
+          <div className="canvas-grid-tex" />
+
+          {/* Vignette overlay for edge darkening */}
+          <div className="vignette" />
+
+          {/* Scroll hint */}
+          <div className={`scroll-hint ${hintVisible ? "" : "hidden"}`}>
+            <span className="scroll-hint__arrows">↕ ↔</span>
+            Scroll or drag to explore
+          </div>
+
+          {/* Canvas */}
+          <div
+            ref={canvasRef}
+            className={`infinite-canvas${isDragging ? " is-dragging" : ""}`}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            id="infinite-canvas"
+          >
+            <div className="cell-layer">
+              {visibleCells.map(({ key, item, x, y, w, h, scale, opacity }) => (
+                <div
+                  key={key}
+                  className="canvas-cell"
+                  style={{
+                    width: w,
+                    height: h,
+                    transform: `translate(${x}px, ${y}px) scale(${scale})`,
+                    opacity,
+                  }}
+                >
+                  <CellContent item={item} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
-}
-
-/* ════════════════════════════════════════════
-   Cell Content Router
-   ════════════════════════════════════════════ */
-function CellContent({ item }: { item: GridItem }) {
-  switch (item.type) {
-    case "project":
-      return <ProjectCell item={item} />;
-    case "about":
-      return <AboutCell />;
-    case "links":
-      return <LinksCell />;
-    case "specs":
-      return <SpecsCell />;
-    case "skills":
-      return <SkillsCell />;
-    case "status":
-      return <StatusCell />;
-    case "quote":
-      return <QuoteCell />;
-    case "brand":
-      return <BrandCell />;
-    case "stat":
-      return <StatCell number={item.number} label={item.label} />;
-    default:
-      return null;
-  }
-}
-
-/* ════════════════════════════════════════════
-   Cell Components
-   ════════════════════════════════════════════ */
-
-/* ── Project ── */
-function ProjectCell({ item }: { item: ProjectItem }) {
-  return (
-    <a
-      href={item.link}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="cell-project"
-      onClick={(e) => {
-        // Prevent navigation if it was a drag
-        const wasDrag = document
-          .querySelector(".infinite-canvas")
-          ?.classList.contains("is-dragging");
-        if (wasDrag) e.preventDefault();
-      }}
-    >
-      <div className="cell-project__img">
-        <Image
-          src={item.image}
-          alt={item.title}
-          fill
-          sizes="310px"
-          style={{ objectFit: "cover" }}
-          draggable={false}
-        />
-        <div className="cell-project__overlay">
-          <h3>{item.title}</h3>
-          <p>{item.description}</p>
-          <div className="cell-project__tags">
-            {item.tags.map((tag) => (
-              <span
-                key={tag.label}
-                className={`cell-tag${tag.color ? ` cell-tag--${tag.color}` : ""}`}
-              >
-                {tag.label}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </a>
-  );
-}
-
-/* ── About ── */
-function AboutCell() {
-  return (
-    <div className="cell-info cell-about">
-      <h2>
-        <span className="cell-info__icon">👋</span>
-        About Me
-      </h2>
-      <p>
-        ゲーム開発、クリエイティブコーディング、Webアプリ制作を行っています。
-        テクノロジーとアートの交差点で新しい体験を創ることが好きです。
-      </p>
-    </div>
-  );
-}
-
-/* ── Links ── */
-function LinksCell() {
-  return (
-    <div className="cell-info">
-      <h2>
-        <span className="cell-info__icon">🔗</span>
-        Links
-      </h2>
-      <div className="cell-links__list">
-        {socialLinks.map((l) => (
-          <a
-            key={l.name}
-            href={l.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="cell-link-item"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className={`cell-link-icon cell-link-icon--${l.cls}`}>
-              {l.icon}
-            </div>
-            <span className="cell-link-name">{l.name}</span>
-            <span className="cell-link-handle">{l.handle}</span>
-          </a>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ── Specs ── */
-function SpecsCell() {
-  return (
-    <div className="cell-info cell-specs">
-      <h2>
-        <span className="cell-info__icon">🖥</span>
-        PC Specs
-      </h2>
-      <ul className="spec-list">
-        {pcSpecs.map((s) => (
-          <li key={s.label} className="spec-row">
-            <span className="spec-row__label">{s.label}</span>
-            <span className="spec-row__value">{s.value}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/* ── Skills ── */
-function SkillsCell() {
-  return (
-    <div className="cell-info">
+}className="cell-info">
       <h2>
         <span className="cell-info__icon">🛠</span>
         Skills
