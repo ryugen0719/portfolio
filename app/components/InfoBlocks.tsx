@@ -15,6 +15,7 @@ export function CellContent({
   audioAnalyser,
   soundEnabled,
   brandVariant,
+  presentation = "canvas",
 }: {
   item: GridItem;
   imageSizes: string;
@@ -22,10 +23,11 @@ export function CellContent({
   audioAnalyser: AnalyserNode | null;
   soundEnabled: boolean;
   brandVariant?: string;
+  presentation?: "canvas" | "list";
 }) {
   switch (item.type) {
     case "project":
-      return <ProjectCell item={item} imageSizes={imageSizes} onSelect={onProjectSelect} />;
+      return <ProjectCell item={item} imageSizes={imageSizes} onSelect={onProjectSelect} presentation={presentation} />;
     case "about":
       return <AboutCell />;
     case "socialLink":
@@ -37,7 +39,7 @@ export function CellContent({
     case "apps":
       return <FavoriteAppsCell />;
     case "visualizer":
-      return <AudioVisualizerCell analyser={audioAnalyser} isPlaying={soundEnabled} />;
+      return <AudioVisualizerCell analyser={audioAnalyser} isPlaying={soundEnabled} animate={presentation !== "list" || soundEnabled} />;
     case "spacer":
       return <SpacerCell variant={item.variant} />;
     case "status":
@@ -64,15 +66,35 @@ function ProjectCell({
   item,
   imageSizes,
   onSelect,
+  presentation,
 }: {
   item: ProjectItem;
   imageSizes: string;
   onSelect: (project: ProjectItem, trigger: HTMLButtonElement) => void;
+  presentation: "canvas" | "list";
 }) {
+  const overlay = (
+    <div className="cell-project__overlay">
+      <h3>{item.title}</h3>
+      <p>{item.description}</p>
+      <div className="cell-project__tags">
+        {item.tags.map((tag) => (
+          <span
+            key={tag.label}
+            className={`cell-tag${tag.color ? ` cell-tag--${tag.color}` : ""}`}
+          >
+            {tag.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <button
       type="button"
-      className="cell-project"
+      className={`cell-project${presentation === "list" ? " cell-project--list" : ""}`}
+      aria-label={presentation === "list" ? `${item.title}: ${item.description}` : undefined}
       onClick={(event) => onSelect(item, event.currentTarget)}
     >
       <div className="cell-project__img">
@@ -85,21 +107,9 @@ function ProjectCell({
           style={{ objectFit: "cover" }}
           draggable={false}
         />
-        <div className="cell-project__overlay">
-          <h3>{item.title}</h3>
-          <p>{item.description}</p>
-          <div className="cell-project__tags">
-            {item.tags.map((tag) => (
-              <span
-                key={tag.label}
-                className={`cell-tag${tag.color ? ` cell-tag--${tag.color}` : ""}`}
-              >
-                {tag.label}
-              </span>
-            ))}
-          </div>
-        </div>
+        {presentation === "canvas" && overlay}
       </div>
+      {presentation === "list" && overlay}
     </button>
   );
 }
@@ -278,7 +288,7 @@ function FavoriteAppsCell() {
 }
 
 /* ── Audio Visualizer ── */
-function AudioVisualizerCell({ analyser, isPlaying }: { analyser: AnalyserNode | null; isPlaying: boolean }) {
+function AudioVisualizerCell({ analyser, isPlaying, animate }: { analyser: AnalyserNode | null; isPlaying: boolean; animate: boolean }) {
   const barsRef = useRef<SVGGElement>(null);
   const barCount = 48;
   const innerRadius = 44;
@@ -286,7 +296,7 @@ function AudioVisualizerCell({ analyser, isPlaying }: { analyser: AnalyserNode |
   useEffect(() => {
     const frequencyData = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
     let frame = 0;
-    const animate = (time: number) => {
+    const draw = (time: number, shouldAnimate: boolean) => {
       if (analyser && frequencyData) analyser.getByteFrequencyData(frequencyData);
       const bars = barsRef.current?.children;
       if (bars) {
@@ -294,8 +304,8 @@ function AudioVisualizerCell({ analyser, isPlaying }: { analyser: AnalyserNode |
           const bin = frequencyData
             ? Math.min(frequencyData.length - 1, Math.floor((index / bars.length) * frequencyData.length * 0.85))
             : 0;
-          const fallback = isPlaying ? 0.12 + (Math.sin(time / 310 + index * 1.35) + 1) * 0.12 : 0.015;
-          const level = frequencyData ? frequencyData[bin] / 255 : fallback;
+          const fallback = shouldAnimate && isPlaying ? 0.12 + (Math.sin(time / 310 + index * 1.35) + 1) * 0.12 : 0.04;
+          const level = shouldAnimate && frequencyData ? frequencyData[bin] / 255 : fallback;
           const angle = (index / bars.length) * Math.PI * 2;
           const endRadius = innerRadius + 5 + level * 27;
           const line = bars[index] as SVGLineElement;
@@ -306,12 +316,14 @@ function AudioVisualizerCell({ analyser, isPlaying }: { analyser: AnalyserNode |
           line.style.opacity = `${0.34 + level * 0.56}`;
         }
       }
-      frame = requestAnimationFrame(animate);
+      if (shouldAnimate) frame = requestAnimationFrame((nextTime) => draw(nextTime, true));
     };
 
-    frame = requestAnimationFrame(animate);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (animate && !reducedMotion) frame = requestAnimationFrame((time) => draw(time, true));
+    else draw(0, false);
     return () => cancelAnimationFrame(frame);
-  }, [analyser, isPlaying]);
+  }, [analyser, animate, isPlaying]);
 
   return (
     <div className="audio-visualizer" aria-hidden="true">

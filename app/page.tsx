@@ -3,9 +3,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from "react";
 import Script from "next/script";
 import { GridItem, ProjectItem } from "./types";
-import { gridLayout, itemsRegistry } from "./data";
+import { gridLayout, itemsRegistry, projects, socialLinks } from "./data";
 import { resolveGridPlacements } from "./grid-layout";
 import { CellContent, ProjectLightbox } from "./components/InfoBlocks";
+import {
+  beginCanvasPointer,
+  endCanvasPointer,
+  getAnchoredZoomTransform,
+  getPinchZoom,
+  moveCanvasPointer,
+} from "./canvas-gesture.mjs";
 
 /* ════════════════════════════════════════════
    Grid Generation Logic
@@ -37,7 +44,6 @@ const GRID_CATEGORIES: { id: GridCategory; label: string }[] = [
   { id: "links", label: "リンク" },
   { id: "profile", label: "プロフィール" },
 ];
-
 const COLS = gridLayout.columns;
 const resolvedPlacements = resolveGridPlacements(
   gridLayout.placements,
@@ -85,6 +91,26 @@ function buildGridItems(): Array<GridTile | null> {
 }
 
 const gridItems = buildGridItems();
+
+function buildMobileItems(category: GridCategory): GridItem[] {
+  const brand = itemsRegistry.brand;
+  const profileItems = ["about", "skills", "specs", "apps", "visualizer"]
+    .map((id) => itemsRegistry[id])
+    .filter((item): item is GridItem => Boolean(item));
+  const closingItems = ["status", "countdown", "quote", "stat"]
+    .map((id) => itemsRegistry[id])
+    .filter((item): item is GridItem => Boolean(item));
+
+  if (category === "blender") {
+    return [brand, ...projects.filter((item) => item.tags.some((tag) => tag.label === "Blender"))];
+  }
+  if (category === "photography") return [brand, ...projects.filter((item) => item.category === "Photography")];
+  if (category === "scratch") return [brand, ...projects.filter((item) => item.category === "Scratch")];
+  if (category === "links") return [brand, ...socialLinks];
+  if (category === "profile") return [brand, ...profileItems, ...closingItems];
+
+  return [brand, ...profileItems, ...projects, ...socialLinks, ...closingItems];
+}
 
 function buildFilteredGrid(category: GridCategory) {
   if (category === "all") return { items: gridItems, rows: ROWS, contentRows: ROWS };
@@ -170,6 +196,9 @@ function buildFilteredGrid(category: GridCategory) {
 const GRID_CATEGORY_COUNTS = Object.fromEntries(
   GRID_CATEGORIES.map(({ id }) => [id, buildFilteredGrid(id).items.filter(Boolean).length]),
 ) as Record<GridCategory, number>;
+const MOBILE_CATEGORY_COUNTS = Object.fromEntries(
+  GRID_CATEGORIES.map(({ id }) => [id, buildMobileItems(id).length]),
+) as Record<GridCategory, number>;
 
 const CELL_W = 310;
 const CELL_H = 250;
@@ -180,9 +209,12 @@ const CONTENT_W = COLS * STEP_X;
 const CONTENT_H = ROWS * STEP_Y;
 const FRICTION = 0.92;
 const WHEEL_SPEED = 1.2;
-const CATEGORY_EXIT_MS = 1500;
-const CATEGORY_BLANK_MS = 200;
-const CATEGORY_ENTER_MS = 1500;
+const MIN_CANVAS_ZOOM = 0.55;
+const MAX_CANVAS_ZOOM = 1.75;
+const WHEEL_ZOOM_SPEED = 0.002;
+const CATEGORY_EXIT_MS = 420;
+const CATEGORY_BLANK_MS = 60;
+const CATEGORY_ENTER_MS = 520;
 
 function getBrandCameraTarget(viewportWidth: number, viewportHeight: number) {
   const placement = gridLayout.placements.find(({ id }) => id === "brand");
@@ -360,6 +392,8 @@ export default function PortfolioPage() {
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [activeCategory, setActiveCategory] = useState<GridCategory>("all");
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [showMobileList, setShowMobileList] = useState(false);
   const [displayCategory, setDisplayCategory] = useState<GridCategory>("all");
   const [outgoingCells, setOutgoingCells] = useState<VisibleCell[] | null>(null);
   const [categoryTransitionPhase, setCategoryTransitionPhase] = useState<CategoryTransitionPhase>("idle");
@@ -372,9 +406,31 @@ export default function PortfolioPage() {
   const visibleCellsRef = useRef<VisibleCell[]>([]);
   const pendingCategoryRef = useRef<GridCategory>("all");
   const filteredGrid = useMemo(() => buildFilteredGrid(displayCategory), [displayCategory]);
+  const mobileItems = useMemo(() => buildMobileItems(displayCategory), [displayCategory]);
+  const isMobile = isMobileViewport && showMobileList;
 
   useEffect(() => {
-    cameraRef.current = getBrandCameraTarget(vpSize.w, vpSize.h);
+    const canvasMode = isMobileViewport && !showMobileList;
+    document.body.classList.toggle("canvas-mode", canvasMode);
+    document.documentElement.classList.toggle("canvas-mode", canvasMode);
+    return () => {
+      document.body.classList.remove("canvas-mode");
+      document.documentElement.classList.remove("canvas-mode");
+    };
+  }, [isMobileViewport, showMobileList]);
+
+  useEffect(() => {
+    const currentMode = showMobileList ? "list" : "canvas";
+    if (previousDisplayModeRef.current === currentMode) return;
+    previousDisplayModeRef.current = currentMode;
+    window.requestAnimationFrame(() => {
+      if (showMobileList) mobileCanvasModeButtonRef.current?.focus();
+      else mobileListModeButtonRef.current?.focus();
+    });
+  }, [showMobileList]);
+
+  useEffect(() => {
+    cameraRef.current = getBrandCameraTarget(vpSize.w / zoomRef.current, vpSize.h / zoomRef.current);
     setTick((tick) => tick + 1);
   }, [displayCategory, vpSize.w, vpSize.h]);
 
@@ -383,13 +439,27 @@ export default function PortfolioPage() {
   const cameraRef = useRef({ x: 0, y: 0 });
   const categoryTransitionTimerRef = useRef<number | null>(null);
   const velRef = useRef({ x: 0, y: 0 });
-  const dragStartRef = useRef({ x: 0, y: 0 });
-  const camStartRef = useRef({ x: 0, y: 0 });
+  const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const gestureRef = useRef({
+    mode: "idle" as "idle" | "pan" | "pinch",
+    pointerId: null as number | null,
+    startPointer: { x: 0, y: 0 },
+    startCamera: { x: 0, y: 0 },
+    startZoom: 1,
+    startDistance: 1,
+    startCenter: { x: 0, y: 0 },
+    hadPinch: false,
+  });
+  const zoomRef = useRef(1);
   const isDraggingRef = useRef(false);
   const dragMovedRef = useRef(false);
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<number | null>(null);
   const focusReturnRef = useRef<HTMLButtonElement | null>(null);
+  const mobileResultsHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const mobileCanvasModeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileListModeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousDisplayModeRef = useRef("canvas");
   const ambientAudioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -403,10 +473,13 @@ export default function PortfolioPage() {
   /* ── Mount ── */
   useEffect(() => {
     setMounted(true);
-    const update = () => setVpSize({ w: window.innerWidth, h: window.innerHeight });
+    const update = () => {
+      setVpSize({ w: window.innerWidth, h: window.innerHeight });
+      setIsMobileViewport(window.matchMedia("(max-width: 767px)").matches);
+    };
     update();
     // Center the brand tile on the viewport when the site opens.
-    cameraRef.current = getBrandCameraTarget(window.innerWidth, window.innerHeight);
+    cameraRef.current = getBrandCameraTarget(window.innerWidth / zoomRef.current, window.innerHeight / zoomRef.current);
     setTick((t) => t + 1);
     window.addEventListener("resize", update);
 
@@ -608,6 +681,18 @@ export default function PortfolioPage() {
     setActiveCategory(category);
     pendingCategoryRef.current = category;
     if (categoryTransitionTimerRef.current !== null) window.clearTimeout(categoryTransitionTimerRef.current);
+    if (isMobile) {
+      setDisplayCategory(category);
+      setOutgoingCells(null);
+      setCategoryTransitionPhase("idle");
+      categoryTransitionTimerRef.current = null;
+      window.scrollTo({
+        top: 0,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      });
+      window.requestAnimationFrame(() => mobileResultsHeadingRef.current?.focus());
+      return;
+    }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setDisplayCategory(category);
       setOutgoingCells(null);
@@ -641,16 +726,36 @@ export default function PortfolioPage() {
       setCategoryTransitionPhase("blank");
       categoryTransitionTimerRef.current = window.setTimeout(beginEntering, CATEGORY_BLANK_MS);
     }, CATEGORY_EXIT_MS);
-  }, [activeCategory, categoryTransitionPhase, playUiSound]);
+  }, [activeCategory, categoryTransitionPhase, isMobile, playUiSound]);
 
   /* ── Wheel ── */
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
+      if (e.ctrlKey) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        const originX = e.clientX - (rect?.left ?? 0);
+        const originY = e.clientY - (rect?.top ?? 0);
+        const oldZoom = zoomRef.current;
+        const transform = getAnchoredZoomTransform({
+          camera: cameraRef.current,
+          startZoom: oldZoom,
+          requestedZoom: oldZoom * Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED),
+          startAnchor: { x: originX, y: originY },
+          nextAnchor: { x: originX, y: originY },
+          viewportOrigin: { x: 0, y: 0 },
+          minZoom: MIN_CANVAS_ZOOM,
+          maxZoom: MAX_CANVAS_ZOOM,
+        });
+        zoomRef.current = transform.zoom;
+        cameraRef.current = transform.camera;
+        setTick((t) => t + 1);
+        return;
+      }
       const dx = (e.deltaX || (e.shiftKey ? e.deltaY : 0)) * WHEEL_SPEED;
       const dy = (e.shiftKey ? 0 : e.deltaY) * WHEEL_SPEED;
-      cameraRef.current.x += dx;
-      cameraRef.current.y += dy;
+      cameraRef.current.x += dx / zoomRef.current;
+      cameraRef.current.y += dy / zoomRef.current;
       setTick((t) => t + 1);
 
       if (!hasScrolledRef.current) {
@@ -697,20 +802,36 @@ export default function PortfolioPage() {
   /* ── Drag handlers ── */
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      dragMovedRef.current = false;
-      suppressClickRef.current = false;
-      if (suppressClickTimerRef.current !== null) {
-        window.clearTimeout(suppressClickTimerRef.current);
-        suppressClickTimerRef.current = null;
-      }
+      const point = { x: e.clientX, y: e.clientY };
+      const gestureStart = beginCanvasPointer(
+        activePointersRef.current,
+        gestureRef.current,
+        e.pointerId,
+        point,
+        cameraRef.current,
+        zoomRef.current,
+      );
+      activePointersRef.current = gestureStart.pointers;
+      gestureRef.current = gestureStart.gesture;
       isDraggingRef.current = true;
-      setIsDragging(true);
-      dragStartRef.current = { x: e.clientX, y: e.clientY };
-      camStartRef.current = { ...cameraRef.current };
-      lastMouseRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       velRef.current = { x: 0, y: 0 };
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+
+      if (gestureStart.mode === "pan") {
+        dragMovedRef.current = false;
+        suppressClickRef.current = false;
+        if (suppressClickTimerRef.current !== null) {
+          window.clearTimeout(suppressClickTimerRef.current);
+          suppressClickTimerRef.current = null;
+        }
+        lastMouseRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
+      } else if (gestureStart.mode === "pinch") {
+        dragMovedRef.current = true;
+        setIsDragging(true);
+      }
 
       if (!hasScrolledRef.current) {
         hasScrolledRef.current = true;
@@ -721,27 +842,76 @@ export default function PortfolioPage() {
   );
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDraggingRef.current) return;
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
-    if (Math.hypot(dx, dy) > 6) dragMovedRef.current = true;
-    cameraRef.current.x = camStartRef.current.x - dx;
-    cameraRef.current.y = camStartRef.current.y - dy;
+    const pointers = moveCanvasPointer(activePointersRef.current, e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pointers) return;
+    activePointersRef.current = pointers;
+    const gesture = gestureRef.current;
 
-    // Track velocity
+    if (gesture.mode === "pinch" && pointers.size >= 2) {
+      const [first, second] = Array.from(pointers.values());
+      const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+      const distance = Math.max(1, Math.hypot(second.x - first.x, second.y - first.y));
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const left = rect?.left ?? 0;
+      const top = rect?.top ?? 0;
+      if (Math.abs(distance - gesture.startDistance) > 2 || Math.hypot(center.x - gesture.startCenter.x, center.y - gesture.startCenter.y) > 2) {
+        dragMovedRef.current = true;
+        setIsDragging(true);
+      }
+      const nextZoom = getPinchZoom(gesture.startZoom, gesture.startDistance, distance, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM);
+      const transform = getAnchoredZoomTransform({
+        camera: gesture.startCamera,
+        startZoom: gesture.startZoom,
+        requestedZoom: nextZoom,
+        startAnchor: gesture.startCenter,
+        nextAnchor: center,
+        viewportOrigin: { x: left, y: top },
+        minZoom: MIN_CANVAS_ZOOM,
+        maxZoom: MAX_CANVAS_ZOOM,
+      });
+      zoomRef.current = transform.zoom;
+      cameraRef.current = transform.camera;
+      velRef.current = { x: 0, y: 0 };
+      setTick((tick) => tick + 1);
+      return;
+    }
+
+    if (gesture.mode !== "pan" || gesture.pointerId !== e.pointerId) return;
+    const dx = e.clientX - gesture.startPointer.x;
+    const dy = e.clientY - gesture.startPointer.y;
+    if (Math.hypot(dx, dy) > 6) {
+      dragMovedRef.current = true;
+      setIsDragging(true);
+    }
+    cameraRef.current.x = gesture.startCamera.x - dx / gesture.startZoom;
+    cameraRef.current.y = gesture.startCamera.y - dy / gesture.startZoom;
+
     const now = Date.now();
     const dt = Math.max(1, now - lastMouseRef.current.t);
     velRef.current = {
-      x: (e.clientX - lastMouseRef.current.x) / dt * 16,
-      y: (e.clientY - lastMouseRef.current.y) / dt * 16,
+      x: (e.clientX - lastMouseRef.current.x) / dt * 16 / gesture.startZoom,
+      y: (e.clientY - lastMouseRef.current.y) / dt * 16 / gesture.startZoom,
     };
     lastMouseRef.current = { x: e.clientX, y: e.clientY, t: now };
-
-    setTick((t) => t + 1);
+    setTick((tick) => tick + 1);
   }, []);
 
-  const onPointerUp = useCallback(() => {
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    const previousGesture = gestureRef.current;
+    const gestureEnd = endCanvasPointer(
+      activePointersRef.current,
+      previousGesture,
+      e.pointerId,
+      cameraRef.current,
+      zoomRef.current,
+    );
+    if (gestureEnd.ignored) return;
+    activePointersRef.current = gestureEnd.pointers;
+    gestureRef.current = gestureEnd.gesture;
+    if (gestureEnd.remaining) return;
+
     const didDrag = dragMovedRef.current;
+    const hadPinch = previousGesture.hadPinch;
     isDraggingRef.current = false;
     setIsDragging(false);
     if (didDrag) {
@@ -751,18 +921,21 @@ export default function PortfolioPage() {
         dragMovedRef.current = false;
         suppressClickTimerRef.current = null;
       }, 250);
-      startMomentum();
+      if (!hadPinch) startMomentum();
     }
   }, [startMomentum]);
 
   /* ── Calculate visible cells ── */
   const cam = cameraRef.current;
+  const zoom = zoomRef.current;
+  const worldViewportWidth = vpSize.w / zoom;
+  const worldViewportHeight = vpSize.h / zoom;
   const buffer = 2;
 
   const startCol = Math.floor(cam.x / STEP_X) - buffer;
-  const endCol = Math.ceil((cam.x + vpSize.w) / STEP_X) + buffer;
+  const endCol = Math.ceil((cam.x + worldViewportWidth) / STEP_X) + buffer;
   const startRow = Math.floor(cam.y / STEP_Y) - buffer;
-  const endRow = Math.ceil((cam.y + vpSize.h) / STEP_Y) + buffer;
+  const endRow = Math.ceil((cam.y + worldViewportHeight) / STEP_Y) + buffer;
 
   const visibleCells: VisibleCell[] = [];
 
@@ -780,12 +953,12 @@ export default function PortfolioPage() {
       const w = CELL_W * columnSpan + GAP * (columnSpan - 1);
       const h = CELL_H * rowSpan + GAP * (rowSpan - 1);
 
-      const sx = col * STEP_X - cam.x;
-      const sy = row * STEP_Y - cam.y;
+      const sx = (col * STEP_X - cam.x) * zoom;
+      const sy = (row * STEP_Y - cam.y) * zoom;
 
       // Soften and darken cells only within the last 105px before a viewport edge.
-      const cx = sx + w / 2;
-      const cy = sy + h / 2;
+      const cx = sx + (w * zoom) / 2;
+      const cy = sy + (h * zoom) / 2;
       const edgeDistance = Math.min(cx, cy, vpSize.w - cx, vpSize.h - cy);
       const edgeT = Math.max(0, Math.min(1, (105 - edgeDistance) / 105));
       const edgeStrength = edgeT * edgeT;
@@ -840,7 +1013,7 @@ export default function PortfolioPage() {
 
               particleWindow.particlesJS("particles-js", {
                 particles: {
-                  number: { value: 72, density: { enable: true, value_area: 1000 } },
+                  number: { value: window.matchMedia("(max-width: 767px)").matches ? 28 : 72, density: { enable: true, value_area: 1000 } },
                   color: { value: ["#d8cdbb", "#c6a66b", "#f3eee5"] },
                   shape: { type: "circle" },
                   opacity: { value: 0.42, random: true, anim: { enable: true, speed: 0.45, opacity_min: 0.12, sync: false } },
@@ -870,18 +1043,18 @@ export default function PortfolioPage() {
           <div className="vignette" />
           <div className="topbar-shade" aria-hidden="true" />
 
-          <div className="canvas-label canvas-label--left">
+          {!isMobile && <div className="canvas-label canvas-label--left">
             <span className="canvas-label__rule" />
             <span>RYUGEN</span>
             <span className="canvas-label__divider">/</span>
             <span className="canvas-label__muted">ABOUT ME / CREATIVE WORK</span>
-          </div>
-          <div className="canvas-label canvas-label--right">
+          </div>}
+          {!isMobile && <div className="canvas-label canvas-label--right">
             <span className="canvas-label__muted">GAMES / 3D / WEB APPS</span>
             <span className="canvas-label__rule" />
-          </div>
+          </div>}
 
-          <nav className="canvas-filter" aria-label="作品カテゴリー">
+          {!isMobile && <nav className="canvas-filter" aria-label="作品カテゴリー">
             <span className="canvas-filter__label">VIEW</span>
             {GRID_CATEGORIES.map(({ id, label }) => (
               <button
@@ -895,7 +1068,7 @@ export default function PortfolioPage() {
                 <span className="canvas-filter__count">{GRID_CATEGORY_COUNTS[id].toString().padStart(2, "0")}</span>
               </button>
             ))}
-          </nav>
+          </nav>}
 
           <audio
             ref={ambientAudioRef}
@@ -910,7 +1083,7 @@ export default function PortfolioPage() {
             src="/audio/juniorsoundays-ui-sound-56-527824.mp3"
             preload="auto"
           />
-          <button
+          {!isMobile && <button
             type="button"
             className={`ambient-audio${soundEnabled ? " is-playing" : ""}`}
             aria-label={soundEnabled ? "BGMを停止" : "BGMを再生"}
@@ -919,22 +1092,83 @@ export default function PortfolioPage() {
           >
             <span className="ambient-audio__indicator" aria-hidden="true" />
             <span>{soundEnabled ? "SOUND ON" : "SOUND OFF"}</span>
-          </button>
+          </button>}
+
+          {isMobile && (
+            <header className="mobile-header">
+              <div className="mobile-header__top">
+                <div className="mobile-brand-mark">
+                  <span className="canvas-label__rule" aria-hidden="true" />
+                  <span>RYUGEN</span>
+                </div>
+                <button
+                  type="button"
+                  className={`mobile-audio${soundEnabled ? " is-playing" : ""}`}
+                  aria-label={soundEnabled ? "BGMを停止" : "BGMを再生"}
+                  aria-pressed={soundEnabled}
+                  onClick={toggleAmbientAudio}
+                >
+                  <span className="ambient-audio__indicator" aria-hidden="true" />
+                  <span>{soundEnabled ? "SOUND ON" : "SOUND OFF"}</span>
+                </button>
+              </div>
+              <div className="mobile-header__modes" aria-label="表示モード">
+                <button
+                  ref={mobileCanvasModeButtonRef}
+                  type="button"
+                  className="mobile-view-mode"
+                  aria-label="無限キャンバス表示に切り替え"
+                  onClick={() => setShowMobileList(false)}
+                >
+                  <span aria-hidden="true">▱</span>
+                  <span>CANVAS</span>
+                </button>
+              </div>
+              <nav className="mobile-filter" aria-label="作品カテゴリー">
+                {GRID_CATEGORIES.map(({ id, label }) => (
+                  <button
+                    type="button"
+                    key={id}
+                    className={`canvas-filter__button${activeCategory === id ? " is-active" : ""}`}
+                    aria-pressed={activeCategory === id}
+                    onClick={() => selectCategory(id)}
+                  >
+                    <span>{label}</span>
+                    <span className="canvas-filter__count">{MOBILE_CATEGORY_COUNTS[id].toString().padStart(2, "0")}</span>
+                  </button>
+                ))}
+              </nav>
+            </header>
+          )}
+
+          {isMobileViewport && !showMobileList && (
+            <button
+              ref={mobileListModeButtonRef}
+              type="button"
+              className="mobile-list-mode-toggle"
+              aria-label="一覧表示に切り替え"
+              onClick={() => setShowMobileList(true)}
+            >
+              <span aria-hidden="true">▤</span>
+              <span>LIST</span>
+            </button>
+          )}
 
           {/* Scroll hint */}
-          <div className={`scroll-hint ${hintVisible ? "" : "hidden"}`}>
+          {!isMobile && <div className={`scroll-hint ${hintVisible ? "" : "hidden"}`}>
             <span className="scroll-hint__arrows">↕ ↔</span>
-            Scroll or drag to explore
-          </div>
+            {isMobileViewport ? "Drag or pinch to explore" : "Scroll or drag to explore"}
+          </div>}
 
           {/* Canvas */}
-          <div
+          {!isMobile && <div
             ref={canvasRef}
             className={`infinite-canvas${isDragging ? " is-dragging" : ""}`}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onLostPointerCapture={onPointerUp}
             onClickCapture={(event) => {
               if (!suppressClickRef.current) return;
               event.preventDefault();
@@ -957,7 +1191,8 @@ export default function PortfolioPage() {
                     style={{
                       width: w,
                       height: h,
-                      transform: `translate(${x}px, ${y}px)`,
+                      transform: `translate(${x}px, ${y}px) scale(${zoom})`,
+                      transformOrigin: "top left",
                       filter: `blur(${blur}px) brightness(${brightness})`,
                       opacity,
                     }}
@@ -978,7 +1213,8 @@ export default function PortfolioPage() {
                     style={{
                       width: w,
                       height: h,
-                      transform: `translate(${x}px, ${y}px)`,
+                      transform: `translate(${x}px, ${y}px) scale(${zoom})`,
+                      transformOrigin: "top left",
                       filter: `blur(${blur}px) brightness(${brightness})`,
                       opacity,
                     }}
@@ -997,7 +1233,46 @@ export default function PortfolioPage() {
                 ))}
               </div>
             )}
-          </div>
+          </div>}
+
+          {isMobile && (
+            <main className="mobile-main">
+              <section className="mobile-results" aria-labelledby="mobile-results-title">
+                <div className="mobile-results__heading">
+                  <span className="mobile-results__eyebrow">SELECTED VIEW</span>
+                  <h2 id="mobile-results-title" ref={mobileResultsHeadingRef} tabIndex={-1}>
+                    {GRID_CATEGORIES.find(({ id }) => id === displayCategory)?.label}
+                  </h2>
+                  <span className="mobile-results__count">
+                    {mobileItems.length.toString().padStart(2, "0")}
+                  </span>
+                </div>
+                {mobileItems.length > 1 ? (
+                  <div key={displayCategory} className="mobile-grid">
+                    {mobileItems.map((item, index) => (
+                      <article
+                        key={item.type === "project" || item.type === "socialLink" ? item.id : `${item.type}-${index}`}
+                        className={`mobile-card mobile-card--${item.type}`}
+                      >
+                        <CellContent
+                          item={item}
+                          imageSizes="(max-width: 479px) calc(100vw - 32px), (max-width: 767px) calc((100vw - 44px) / 2), 310px"
+                          onProjectSelect={selectProject}
+                          audioAnalyser={audioAnalyser}
+                          soundEnabled={soundEnabled}
+                          brandVariant={displayCategory}
+                          presentation="list"
+                        />
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mobile-empty-state">表示できるコンテンツはありません。</p>
+                )}
+              </section>
+              <footer className="mobile-footer">RYUGEN <span>·</span> DESIGN / CODE / IMAGE</footer>
+            </main>
+          )}
         </>
       )}
       {activeProject && (
