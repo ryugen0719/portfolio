@@ -18,9 +18,12 @@ export type SocialLinkItem = {
   handle: string;
   url: string;
   icon: ReactNode;
+  images?: string[];
 };
 
 export type GridPlacement = {
+  /** Registry key for rendering when this placement is a duplicate instance. */
+  itemId?: string;
   id: string;
   column: number;
   row: number;
@@ -29,8 +32,12 @@ export type GridPlacement = {
 };
 
 export type StatItem = { type: "stat"; number: string; label: string };
+export type SpacerItem = {
+  type: "spacer";
+  variant: "orbit" | "diamond" | "rings" | "grid" | "radial";
+};
 export type InfoItem = {
-  type: "about" | "specs" | "skills" | "status" | "quote" | "brand" | "empty";
+  type: "about" | "specs" | "skills" | "apps" | "visualizer" | "status" | "quote" | "brand" | "empty" | "countdown";
 };
 
-export type GridItem = ProjectItem | SocialLinkItem | StatItem | InfoItem;
+export type GridItem = ProjectItem | SocialLinkItem | StatItem | SpacerItem | InfoItem;

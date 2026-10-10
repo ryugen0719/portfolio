@@ -9,10 +9,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Ryugen | Creative Portfolio",
+  title: "Ryugen | About Me & Creative Work",
   description:
-    "Ryugenのポートフォリオ — ゲーム開発、クリエイティブコーディング、Webプロジェクトの作品集",
-  keywords: ["portfolio", "game dev", "creative coding", "Ryugen"],
+    "Ryugenの自己紹介ページ。Scratchでのゲーム制作、Blender作品、AIを活用したWebアプリ開発など、興味や制作物を紹介します。",
+  keywords: ["自己紹介", "プロフィール", "ゲーム制作", "Blender", "Webアプリ", "Ryugen"],
 };
 
 export default function RootLayout({

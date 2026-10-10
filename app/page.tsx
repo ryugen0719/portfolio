@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from "react";
 import Script from "next/script";
 import { GridItem, ProjectItem } from "./types";
 import { gridLayout, itemsRegistry } from "./data";
@@ -15,12 +15,25 @@ type GridTile = {
   columnSpan: number;
   rowSpan: number;
 };
+type VisibleCell = {
+  key: string;
+  item: GridItem;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  blur: number;
+  brightness: number;
+  opacity: number;
+};
 
-type GridCategory = "all" | "blender" | "photography" | "links" | "profile";
+type GridCategory = "all" | "blender" | "photography" | "scratch" | "links" | "profile";
+type CategoryTransitionPhase = "idle" | "exit" | "blank" | "enter";
 const GRID_CATEGORIES: { id: GridCategory; label: string }[] = [
   { id: "all", label: "すべて" },
   { id: "blender", label: "Blender" },
   { id: "photography", label: "写真" },
+  { id: "scratch", label: "Scratch" },
   { id: "links", label: "リンク" },
   { id: "profile", label: "プロフィール" },
 ];
@@ -45,7 +58,7 @@ function buildGridItems(): Array<GridTile | null> {
   for (const placement of resolvedPlacements) {
     const columnSpan = placement.columnSpan ?? 1;
     const rowSpan = placement.rowSpan ?? 1;
-    const item = itemsRegistry[placement.id];
+    const item = itemsRegistry[placement.itemId ?? placement.id];
 
     if (!item) throw new Error(`Unknown grid item: ${placement.id}`);
     if (placedIds.has(placement.id)) throw new Error(`Duplicate grid placement: ${placement.id}`);
@@ -79,20 +92,46 @@ function buildFilteredGrid(category: GridCategory) {
   const candidates = gridItems.filter((tile): tile is GridTile => {
     if (!tile) return false;
     const { item } = tile;
+    if (item.type === "brand") return true;
+    if (item.type === "spacer") return false;
     if (category === "blender") return item.type === "project" && item.tags.some((tag) => tag.label === "Blender");
     if (category === "photography") return item.type === "project" && item.category === "Photography";
+    if (category === "scratch") return item.type === "project" && item.category === "Scratch";
     if (category === "links") return item.type === "socialLink";
     return item.type !== "project" && item.type !== "socialLink";
   });
 
   const occupied = new Set<number>();
   const placements: { tile: GridTile; column: number; row: number }[] = [];
+  const brandPlacement = resolvedPlacements.find(({ id }) => id === "brand");
+  const brandTile = candidates.find(({ item }) => item.type === "brand");
   let contentRows = 1;
 
+  if (brandPlacement && brandTile) {
+    const columnSpan = brandTile.columnSpan;
+    const rowSpan = brandTile.rowSpan;
+    placements.push({ tile: brandTile, column: brandPlacement.column, row: brandPlacement.row });
+    for (let row = brandPlacement.row; row < brandPlacement.row + rowSpan; row++) {
+      for (let column = brandPlacement.column; column < brandPlacement.column + columnSpan; column++) {
+        occupied.add(row * COLS + column);
+      }
+    }
+    contentRows = brandPlacement.row + rowSpan;
+  }
+
   for (const tile of candidates) {
-    let placed = false;
-    for (let row = 0; row <= contentRows + candidates.length && !placed; row++) {
-      for (let column = 0; column <= COLS - tile.columnSpan && !placed; column++) {
+    if (tile.item.type === "brand") continue;
+    let bestPosition: { column: number; row: number; score: number } | null = null;
+    const brandColumn = brandPlacement?.column ?? Math.floor(COLS / 2);
+    const brandRow = brandPlacement?.row ?? 0;
+    const brandColumnSpan = brandTile?.columnSpan ?? 1;
+    const brandRowSpan = brandTile?.rowSpan ?? 1;
+    const brandCenterColumn = brandColumn + brandColumnSpan / 2;
+    const brandCenterRow = brandRow + brandRowSpan / 2;
+    const searchRows = Math.max(gridLayout.minRows, brandRow + candidates.length * 2 + 1);
+
+    for (let row = 0; row < searchRows; row++) {
+      for (let column = 0; column <= COLS - tile.columnSpan; column++) {
         let fits = true;
         for (let y = row; y < row + tile.rowSpan && fits; y++) {
           for (let x = column; x < column + tile.columnSpan; x++) {
@@ -103,14 +142,23 @@ function buildFilteredGrid(category: GridCategory) {
           }
         }
         if (!fits) continue;
-        placements.push({ tile, column, row });
-        for (let y = row; y < row + tile.rowSpan; y++) {
-          for (let x = column; x < column + tile.columnSpan; x++) occupied.add(y * COLS + x);
-        }
-        contentRows = Math.max(contentRows, row + tile.rowSpan);
-        placed = true;
+
+        const gapColumn = Math.max(0, brandColumn - (column + tile.columnSpan), column - (brandColumn + brandColumnSpan));
+        const gapRow = Math.max(0, brandRow - (row + tile.rowSpan), row - (brandRow + brandRowSpan));
+        const centerColumn = column + tile.columnSpan / 2;
+        const centerRow = row + tile.rowSpan / 2;
+        const centerDistance = Math.hypot(centerColumn - brandCenterColumn, centerRow - brandCenterRow);
+        const score = (gapColumn + gapRow) * 100 + centerDistance;
+        if (!bestPosition || score < bestPosition.score) bestPosition = { column, row, score };
       }
     }
+
+    if (!bestPosition) continue;
+    placements.push({ tile, column: bestPosition.column, row: bestPosition.row });
+    for (let y = bestPosition.row; y < bestPosition.row + tile.rowSpan; y++) {
+      for (let x = bestPosition.column; x < bestPosition.column + tile.columnSpan; x++) occupied.add(y * COLS + x);
+    }
+    contentRows = Math.max(contentRows, bestPosition.row + tile.rowSpan);
   }
 
   const rows = Math.max(gridLayout.minRows, contentRows);
@@ -132,258 +180,35 @@ const CONTENT_W = COLS * STEP_X;
 const CONTENT_H = ROWS * STEP_Y;
 const FRICTION = 0.92;
 const WHEEL_SPEED = 1.2;
+const CATEGORY_EXIT_MS = 1500;
+const CATEGORY_BLANK_MS = 200;
+const CATEGORY_ENTER_MS = 1500;
+
+function getBrandCameraTarget(viewportWidth: number, viewportHeight: number) {
+  const placement = gridLayout.placements.find(({ id }) => id === "brand");
+  if (!placement) {
+    return {
+      x: (CONTENT_W - viewportWidth) / 2,
+      y: (CONTENT_H - viewportHeight) / 2,
+    };
+  }
+
+  const columnSpan = placement.columnSpan ?? 1;
+  const rowSpan = placement.rowSpan ?? 1;
+  const brandWidth = CELL_W * columnSpan + GAP * (columnSpan - 1);
+  const brandHeight = CELL_H * rowSpan + GAP * (rowSpan - 1);
+
+  return {
+    x: placement.column * STEP_X + brandWidth / 2 - viewportWidth / 2,
+    y: placement.row * STEP_Y + brandHeight / 2 - viewportHeight / 2,
+  };
+}
 
 /* ════════════════════════════════════════════
    Helpers
    ════════════════════════════════════════════ */
 function mod(n: number, m: number): number {
   return ((n % m) + m) % m;
-}
-
-function MazeAnimation() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameRef = useRef<{ move: (dx: number, dy: number) => void } | null>(null);
-  const [ready, setReady] = useState(false);
-  const [solved, setSolved] = useState(false);
-  const [moves, setMoves] = useState(0);
-  const [run, setRun] = useState(0);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = canvas?.parentElement;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !container || !context) return;
-
-    setReady(false);
-    setSolved(false);
-    setMoves(0);
-    const columns = 28;
-    const rows = 16;
-    const cells = Array.from({ length: rows }, () =>
-      Array.from({ length: columns }, () => ({ walls: [true, true, true, true], visited: false })),
-    );
-    const stack: { x: number; y: number }[] = [{ x: 0, y: 0 }];
-    cells[0][0].visited = true;
-    let current = stack[0];
-    let frame = 0;
-    let complete = false;
-    let hasSolved = false;
-    let player = { x: 0, y: 0 };
-    let trail = [{ x: 0, y: 0 }];
-    let width = 0;
-    let height = 0;
-    let pixelRatio = 1;
-
-    const resize = () => {
-      const bounds = container.getBoundingClientRect();
-      pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      width = Math.max(1, bounds.width);
-      height = Math.max(1, bounds.height);
-      canvas.width = Math.round(width * pixelRatio);
-      canvas.height = Math.round(height * pixelRatio);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      draw();
-    };
-
-    const draw = () => {
-      const cellSize = Math.min((width - 24) / columns, (height - 24) / rows);
-      const mazeWidth = cellSize * columns;
-      const mazeHeight = cellSize * rows;
-      const offsetX = (width - mazeWidth) / 2;
-      const offsetY = (height - mazeHeight) / 2;
-      context.clearRect(0, 0, width, height);
-      context.lineWidth = 1;
-      context.lineCap = "square";
-      context.strokeStyle = "rgba(243, 238, 229, 0.3)";
-      context.beginPath();
-
-      for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < columns; x++) {
-          const cell = cells[y][x];
-          const left = offsetX + x * cellSize;
-          const top = offsetY + y * cellSize;
-          if (cell.walls[0]) { context.moveTo(left, top); context.lineTo(left + cellSize, top); }
-          if (cell.walls[1]) { context.moveTo(left + cellSize, top); context.lineTo(left + cellSize, top + cellSize); }
-          if (cell.walls[2]) { context.moveTo(left + cellSize, top + cellSize); context.lineTo(left, top + cellSize); }
-          if (cell.walls[3]) { context.moveTo(left, top + cellSize); context.lineTo(left, top); }
-        }
-      }
-      context.stroke();
-
-      context.fillStyle = "rgba(198, 166, 107, 0.38)";
-      for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < columns; x++) {
-          if (!cells[y][x].visited) continue;
-          context.beginPath();
-          context.arc(offsetX + (x + 0.5) * cellSize, offsetY + (y + 0.5) * cellSize, 1, 0, Math.PI * 2);
-          context.fill();
-        }
-      }
-
-      if (trail.length > 1) {
-        context.strokeStyle = "rgba(245, 89, 81, 0.52)";
-        context.lineWidth = Math.max(1, cellSize * 0.12);
-        context.beginPath();
-        trail.forEach((point, index) => {
-          const px = offsetX + (point.x + 0.5) * cellSize;
-          const py = offsetY + (point.y + 0.5) * cellSize;
-          if (index === 0) context.moveTo(px, py);
-          else context.lineTo(px, py);
-        });
-        context.stroke();
-        context.lineWidth = 1;
-      }
-
-      const marker = (point: { x: number; y: number }, color: string, radius: number) => {
-        context.fillStyle = color;
-        context.beginPath();
-        context.arc(offsetX + (point.x + 0.5) * cellSize, offsetY + (point.y + 0.5) * cellSize, radius, 0, Math.PI * 2);
-        context.fill();
-      };
-      marker({ x: 0, y: 0 }, "#edd2a0", Math.max(2.5, cellSize * 0.22));
-      marker({ x: columns - 1, y: rows - 1 }, "#f55951", Math.max(2.5, cellSize * 0.22));
-      if (complete) marker(player, "#f1e8e6", Math.max(2.5, cellSize * 0.27));
-      if (!complete) {
-        const pulse = 2.4 + Math.sin(performance.now() / 180) * 0.7;
-        context.fillStyle = "#f1e8e6";
-        context.shadowColor = "rgba(198, 166, 107, 0.9)";
-        context.shadowBlur = 14;
-        context.beginPath();
-        context.arc(offsetX + (current.x + 0.5) * cellSize, offsetY + (current.y + 0.5) * cellSize, pulse, 0, Math.PI * 2);
-        context.fill();
-        context.shadowBlur = 0;
-      }
-    };
-
-    const directions = [
-      { dx: 0, dy: -1, wall: 0, opposite: 2 },
-      { dx: 1, dy: 0, wall: 1, opposite: 3 },
-      { dx: 0, dy: 1, wall: 2, opposite: 0 },
-      { dx: -1, dy: 0, wall: 3, opposite: 1 },
-    ];
-
-    const tick = () => {
-      for (let step = 0; step < 10 && stack.length; step++) {
-        current = stack[stack.length - 1];
-        const options = directions
-          .map((direction) => ({ ...direction, x: current.x + direction.dx, y: current.y + direction.dy }))
-          .filter(({ x, y }) => x >= 0 && x < columns && y >= 0 && y < rows && !cells[y][x].visited);
-
-        if (!options.length) {
-          stack.pop();
-          continue;
-        }
-
-        const direction = options[Math.floor(Math.random() * options.length)];
-        cells[current.y][current.x].walls[direction.wall] = false;
-        cells[direction.y][direction.x].walls[direction.opposite] = false;
-        cells[direction.y][direction.x].visited = true;
-        current = { x: direction.x, y: direction.y };
-        stack.push(current);
-      }
-
-      complete = stack.length === 0;
-      draw();
-      if (!complete) {
-        frame = requestAnimationFrame(tick);
-      } else {
-        setReady(true);
-      }
-    };
-
-    const move = (dx: number, dy: number) => {
-      if (!complete || hasSolved) return;
-      const wall = dy < 0 ? 0 : dx > 0 ? 1 : dy > 0 ? 2 : 3;
-      if (cells[player.y][player.x].walls[wall]) return;
-      player = { x: player.x + dx, y: player.y + dy };
-      trail = [...trail, player];
-      setMoves((count) => count + 1);
-      if (player.x === columns - 1 && player.y === rows - 1) {
-        hasSolved = true;
-        setSolved(true);
-      }
-      draw();
-    };
-    gameRef.current = { move };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      const directions: Record<string, [number, number]> = {
-        arrowup: [0, -1], w: [0, -1],
-        arrowright: [1, 0], d: [1, 0],
-        arrowdown: [0, 1], s: [0, 1],
-        arrowleft: [-1, 0], a: [-1, 0],
-      };
-      const direction = directions[key];
-      if (!direction) return;
-      event.preventDefault();
-      event.stopPropagation();
-      move(direction[0], direction[1]);
-    };
-    window.addEventListener("keydown", onKeyDown);
-
-    const observer = new ResizeObserver(resize);
-    observer.observe(container);
-    resize();
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      while (stack.length) {
-        current = stack[stack.length - 1];
-        const options = directions
-          .map((direction) => ({ ...direction, x: current.x + direction.dx, y: current.y + direction.dy }))
-          .filter(({ x, y }) => x >= 0 && x < columns && y >= 0 && y < rows && !cells[y][x].visited);
-        if (!options.length) { stack.pop(); continue; }
-        const direction = options[Math.floor(Math.random() * options.length)];
-        cells[current.y][current.x].walls[direction.wall] = false;
-        cells[direction.y][direction.x].walls[direction.opposite] = false;
-        cells[direction.y][direction.x].visited = true;
-        current = { x: direction.x, y: direction.y };
-        stack.push(current);
-      }
-      complete = true;
-      draw();
-      setReady(true);
-    } else {
-      frame = requestAnimationFrame(tick);
-    }
-
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("keydown", onKeyDown);
-      gameRef.current = null;
-    };
-  }, [run]);
-
-  const move = (dx: number, dy: number) => gameRef.current?.move(dx, dy);
-
-  return (
-    <div className="easter-egg__game">
-      <div className="easter-egg__maze-frame">
-        <canvas ref={canvasRef} className="easter-egg__maze" role="img" aria-label="入口から出口まで進む迷路" />
-      </div>
-      <div className="easter-egg__gamebar">
-        <div className="easter-egg__game-status" aria-live="polite">
-          <span className={`easter-egg__status-light ${ready ? "is-ready" : ""}`} />
-          <span>{solved ? "出口に到達しました" : ready ? "出口を目指してください" : "迷路を生成しています"}</span>
-          <span className="easter-egg__move-count">{moves.toString().padStart(2, "0")} MOVES</span>
-          <span className="easter-egg__legend"><i className="is-start" /> START <i className="is-exit" /> EXIT</span>
-        </div>
-        <div className="easter-egg__game-actions">
-          <div className="easter-egg__dpad" aria-label="移動操作">
-            <button type="button" aria-label="上へ移動" disabled={!ready || solved} onClick={() => move(0, -1)}>↑</button>
-            <button type="button" aria-label="左へ移動" disabled={!ready || solved} onClick={() => move(-1, 0)}>←</button>
-            <button type="button" aria-label="下へ移動" disabled={!ready || solved} onClick={() => move(0, 1)}>↓</button>
-            <button type="button" aria-label="右へ移動" disabled={!ready || solved} onClick={() => move(1, 0)}>→</button>
-          </div>
-          <span className="easter-egg__instructions">矢印キー / WASD またはボタンで移動</span>
-          <button type="button" className="easter-egg__restart" onClick={() => setRun((value) => value + 1)}>再挑戦</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function GalleryCursor() {
@@ -532,61 +357,30 @@ export default function PortfolioPage() {
   const [, setTick] = useState(0);        // forces re-render
   const [isDragging, setIsDragging] = useState(false);
   const [hintVisible, setHintVisible] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [activeCategory, setActiveCategory] = useState<GridCategory>("all");
-  const [categoryTransitioning, setCategoryTransitioning] = useState(false);
+  const [displayCategory, setDisplayCategory] = useState<GridCategory>("all");
+  const [outgoingCells, setOutgoingCells] = useState<VisibleCell[] | null>(null);
+  const [categoryTransitionPhase, setCategoryTransitionPhase] = useState<CategoryTransitionPhase>("idle");
+  const [categoryTransitionRun, setCategoryTransitionRun] = useState(0);
   const [vpSize, setVpSize] = useState({ w: 1920, h: 1080 });
   const [activeProject, setActiveProject] = useState<ProjectItem | null>(null);
-  const [easterEggOpen, setEasterEggOpen] = useState(false);
-  const filteredGrid = useMemo(() => buildFilteredGrid(activeCategory), [activeCategory]);
+  const [starfallActive, setStarfallActive] = useState(false);
+  const [starfallRun, setStarfallRun] = useState(0);
+  const starfallTimerRef = useRef<number | null>(null);
+  const visibleCellsRef = useRef<VisibleCell[]>([]);
+  const pendingCategoryRef = useRef<GridCategory>("all");
+  const filteredGrid = useMemo(() => buildFilteredGrid(displayCategory), [displayCategory]);
 
   useEffect(() => {
-    const categoryChanged = previousCategoryRef.current !== activeCategory;
-    previousCategoryRef.current = activeCategory;
-    const focusRows = activeCategory === "all" ? ROWS : filteredGrid.contentRows;
-    const target = {
-      x: (CONTENT_W - vpSize.w) / 2,
-      y: (focusRows * STEP_Y - vpSize.h) / 2,
-    };
-    const start = { ...cameraRef.current };
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (!categoryChanged || reduceMotion) {
-      cameraRef.current = target;
-      setTick((tick) => tick + 1);
-      return;
-    }
-
-    let startTime = 0;
-    const animateCamera = (time: number) => {
-      if (!startTime) startTime = time;
-      const progress = Math.min(1, (time - startTime) / 980);
-      const eased = progress * progress * (3 - 2 * progress);
-      cameraRef.current = {
-        x: start.x + (target.x - start.x) * eased,
-        y: start.y + (target.y - start.y) * eased,
-      };
-      setTick((tick) => tick + 1);
-      if (progress < 1) {
-        categoryCameraFrameRef.current = requestAnimationFrame(animateCamera);
-      } else {
-        categoryCameraFrameRef.current = null;
-      }
-    };
-
-    categoryCameraFrameRef.current = requestAnimationFrame(animateCamera);
-    return () => {
-      if (categoryCameraFrameRef.current !== null) {
-        cancelAnimationFrame(categoryCameraFrameRef.current);
-        categoryCameraFrameRef.current = null;
-      }
-    };
-  }, [activeCategory, filteredGrid.contentRows, vpSize.w, vpSize.h]);
+    cameraRef.current = getBrandCameraTarget(vpSize.w, vpSize.h);
+    setTick((tick) => tick + 1);
+  }, [displayCategory, vpSize.w, vpSize.h]);
 
   /* ── Refs ── */
   const canvasRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef({ x: 0, y: 0 });
-  const previousCategoryRef = useRef<GridCategory>("all");
-  const categoryCameraFrameRef = useRef<number | null>(null);
   const categoryTransitionTimerRef = useRef<number | null>(null);
   const velRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -596,6 +390,11 @@ export default function PortfolioPage() {
   const suppressClickRef = useRef(false);
   const suppressClickTimerRef = useRef<number | null>(null);
   const focusReturnRef = useRef<HTMLButtonElement | null>(null);
+  const ambientAudioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const uiSoundRef = useRef<HTMLAudioElement>(null);
+  const audioFadeFrameRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastMouseRef = useRef({ x: 0, y: 0, t: 0 });
   const hasScrolledRef = useRef(false);
@@ -606,11 +405,8 @@ export default function PortfolioPage() {
     setMounted(true);
     const update = () => setVpSize({ w: window.innerWidth, h: window.innerHeight });
     update();
-    // Center camera so content is roughly centered
-    cameraRef.current = {
-      x: (CONTENT_W - window.innerWidth) / 2,
-      y: (CONTENT_H - window.innerHeight) / 2,
-    };
+    // Center the brand tile on the viewport when the site opens.
+    cameraRef.current = getBrandCameraTarget(window.innerWidth, window.innerHeight);
     setTick((t) => t + 1);
     window.addEventListener("resize", update);
 
@@ -622,7 +418,9 @@ export default function PortfolioPage() {
       window.removeEventListener("resize", update);
       clearTimeout(loadingTimer);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (categoryCameraFrameRef.current !== null) cancelAnimationFrame(categoryCameraFrameRef.current);
+      if (audioFadeFrameRef.current !== null) cancelAnimationFrame(audioFadeFrameRef.current);
+      ambientAudioRef.current?.pause();
+      if (audioContextRef.current) void audioContextRef.current.close();
       if (categoryTransitionTimerRef.current !== null) window.clearTimeout(categoryTransitionTimerRef.current);
       if (suppressClickTimerRef.current !== null) {
         window.clearTimeout(suppressClickTimerRef.current);
@@ -648,11 +446,19 @@ export default function PortfolioPage() {
     let typedKeys = "";
     const reveal = () => {
       setActiveProject(null);
-      setEasterEggOpen(true);
+      setStarfallActive(true);
+      setStarfallRun((run) => run + 1);
+      if (starfallTimerRef.current !== null) window.clearTimeout(starfallTimerRef.current);
+      starfallTimerRef.current = window.setTimeout(() => {
+        setStarfallActive(false);
+        starfallTimerRef.current = null;
+      }, 8500);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setEasterEggOpen(false);
+        setStarfallActive(false);
+        if (starfallTimerRef.current !== null) window.clearTimeout(starfallTimerRef.current);
+        starfallTimerRef.current = null;
         return;
       }
       const target = event.target as HTMLElement | null;
@@ -681,33 +487,166 @@ export default function PortfolioPage() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("click", onBrandClick);
+      if (starfallTimerRef.current !== null) window.clearTimeout(starfallTimerRef.current);
     };
   }, []);
 
+  const playUiSound = useCallback(() => {
+    if (isDraggingRef.current || dragMovedRef.current || suppressClickRef.current) return;
+    const audio = uiSoundRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = 0.14;
+    void audio.play().catch(() => undefined);
+  }, []);
+
   const selectProject = useCallback((project: ProjectItem, trigger: HTMLButtonElement) => {
+    playUiSound();
     focusReturnRef.current = trigger;
     setActiveProject(project);
+  }, [playUiSound]);
+
+  const fadeAmbientAudio = useCallback((audio: HTMLAudioElement, targetVolume: number, duration: number, onComplete?: () => void) => {
+    if (audioFadeFrameRef.current !== null) cancelAnimationFrame(audioFadeFrameRef.current);
+    const startVolume = audio.volume;
+    let startTime = 0;
+    const step = (time: number) => {
+      if (!startTime) startTime = time;
+      const progress = Math.min(1, (time - startTime) / duration);
+      const eased = progress * progress * (3 - 2 * progress);
+      audio.volume = startVolume + (targetVolume - startVolume) * eased;
+      if (progress < 1) {
+        audioFadeFrameRef.current = requestAnimationFrame(step);
+      } else {
+        audioFadeFrameRef.current = null;
+        onComplete?.();
+      }
+    };
+    audioFadeFrameRef.current = requestAnimationFrame(step);
   }, []);
+
+  const toggleAmbientAudio = useCallback(async () => {
+    const audio = ambientAudioRef.current;
+    if (!audio) return;
+
+    if (!audioAnalyserRef.current && typeof window.AudioContext !== "undefined") {
+      try {
+        const context = new AudioContext();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 128;
+        analyser.smoothingTimeConstant = 0.82;
+        const source = context.createMediaElementSource(audio);
+        source.connect(analyser);
+        analyser.connect(context.destination);
+        audioContextRef.current = context;
+        audioAnalyserRef.current = analyser;
+        setAudioAnalyser(analyser);
+      } catch {
+        // Keep the existing audio control working if Web Audio is unavailable.
+      }
+    }
+    if (audioContextRef.current?.state === "suspended") {
+      await audioContextRef.current.resume().catch(() => undefined);
+    }
+
+    if (audioFadeFrameRef.current !== null) {
+      cancelAnimationFrame(audioFadeFrameRef.current);
+      audioFadeFrameRef.current = null;
+    }
+    if (soundEnabled) {
+      setSoundEnabled(false);
+      fadeAmbientAudio(audio, 0, 1200, () => audio.pause());
+      return;
+    }
+    audio.volume = 0;
+    try {
+      await audio.play();
+      setSoundEnabled(true);
+    } catch {
+      audio.pause();
+      setSoundEnabled(false);
+    }
+  }, [fadeAmbientAudio, soundEnabled]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const audio = ambientAudioRef.current;
+    if (!audio) return;
+
+    let cancelled = false;
+    audio.volume = 0;
+    void audio.play().then(() => {
+      if (cancelled) {
+        audio.pause();
+        return;
+      }
+      setSoundEnabled(true);
+    }).catch(() => {
+      audio.pause();
+      if (!cancelled) setSoundEnabled(false);
+    });
+
+    return () => {
+      cancelled = true;
+      if (audioFadeFrameRef.current !== null) {
+        cancelAnimationFrame(audioFadeFrameRef.current);
+        audioFadeFrameRef.current = null;
+      }
+      audio.pause();
+    };
+  }, [mounted]);
+
+  useEffect(() => {
+    const audio = ambientAudioRef.current;
+    if (!audio || !soundEnabled) return;
+    fadeAmbientAudio(audio, activeProject ? 0.12 : 0.24, activeProject ? 900 : 1800);
+  }, [activeProject, fadeAmbientAudio, soundEnabled]);
 
   const selectCategory = useCallback((category: GridCategory) => {
     if (category === activeCategory) return;
-    setCategoryTransitioning(true);
+    playUiSound();
     setActiveCategory(category);
+    pendingCategoryRef.current = category;
     if (categoryTransitionTimerRef.current !== null) window.clearTimeout(categoryTransitionTimerRef.current);
-    categoryTransitionTimerRef.current = window.setTimeout(() => {
-      setCategoryTransitioning(false);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayCategory(category);
+      setOutgoingCells(null);
+      setCategoryTransitionPhase("idle");
       categoryTransitionTimerRef.current = null;
-    }, 1300);
-  }, [activeCategory]);
+      return;
+    }
+
+    const beginEntering = () => {
+      setCategoryTransitionPhase("enter");
+      categoryTransitionTimerRef.current = window.setTimeout(() => {
+        setCategoryTransitionPhase("idle");
+        categoryTransitionTimerRef.current = null;
+      }, CATEGORY_ENTER_MS);
+    };
+
+    if (categoryTransitionPhase === "blank") {
+      setDisplayCategory(category);
+      categoryTransitionTimerRef.current = window.setTimeout(beginEntering, CATEGORY_BLANK_MS);
+      return;
+    }
+
+    if (categoryTransitionPhase !== "exit") {
+      setOutgoingCells(visibleCellsRef.current.map((cell) => ({ ...cell })));
+    }
+    setCategoryTransitionPhase("exit");
+    setCategoryTransitionRun((run) => run + 1);
+    categoryTransitionTimerRef.current = window.setTimeout(() => {
+      setOutgoingCells(null);
+      setDisplayCategory(pendingCategoryRef.current);
+      setCategoryTransitionPhase("blank");
+      categoryTransitionTimerRef.current = window.setTimeout(beginEntering, CATEGORY_BLANK_MS);
+    }, CATEGORY_EXIT_MS);
+  }, [activeCategory, categoryTransitionPhase, playUiSound]);
 
   /* ── Wheel ── */
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
-      if (categoryCameraFrameRef.current !== null) {
-        cancelAnimationFrame(categoryCameraFrameRef.current);
-        categoryCameraFrameRef.current = null;
-      }
       const dx = (e.deltaX || (e.shiftKey ? e.deltaY : 0)) * WHEEL_SPEED;
       const dy = (e.shiftKey ? 0 : e.deltaY) * WHEEL_SPEED;
       cameraRef.current.x += dx;
@@ -758,10 +697,6 @@ export default function PortfolioPage() {
   /* ── Drag handlers ── */
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (categoryCameraFrameRef.current !== null) {
-        cancelAnimationFrame(categoryCameraFrameRef.current);
-        categoryCameraFrameRef.current = null;
-      }
       dragMovedRef.current = false;
       suppressClickRef.current = false;
       if (suppressClickTimerRef.current !== null) {
@@ -813,6 +748,7 @@ export default function PortfolioPage() {
       suppressClickRef.current = true;
       suppressClickTimerRef.current = window.setTimeout(() => {
         suppressClickRef.current = false;
+        dragMovedRef.current = false;
         suppressClickTimerRef.current = null;
       }, 250);
       startMomentum();
@@ -828,17 +764,7 @@ export default function PortfolioPage() {
   const startRow = Math.floor(cam.y / STEP_Y) - buffer;
   const endRow = Math.ceil((cam.y + vpSize.h) / STEP_Y) + buffer;
 
-  const visibleCells: {
-    key: string;
-    item: GridItem;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    blur: number;
-    brightness: number;
-    opacity: number;
-  }[] = [];
+  const visibleCells: VisibleCell[] = [];
 
   for (let row = startRow; row <= endRow; row++) {
     for (let col = startCol; col <= endCol; col++) {
@@ -868,7 +794,7 @@ export default function PortfolioPage() {
       const opacity = 1 - 0.06 * edgeStrength;
 
       visibleCells.push({
-        key: `${activeCategory}_${col}_${row}`,
+        key: `${displayCategory}_${col}_${row}`,
         item,
         x: sx,
         y: sy,
@@ -880,6 +806,7 @@ export default function PortfolioPage() {
       });
     }
   }
+  visibleCellsRef.current = visibleCells;
 
   return (
     <>
@@ -897,7 +824,9 @@ export default function PortfolioPage() {
           {/* Background layers */}
           <div className="canvas-bg" />
           <div className="canvas-grid-tex" />
-          <div id="particles-js" className="particles-layer" aria-hidden="true" />
+          <div id="particles-js" className="particles-layer" aria-hidden="true">
+            <span className="ambient-meteor" />
+          </div>
           <Script
             src="/vendor/particles.js"
             strategy="afterInteractive"
@@ -939,15 +868,16 @@ export default function PortfolioPage() {
 
           {/* Vignette overlay for edge darkening */}
           <div className="vignette" />
+          <div className="topbar-shade" aria-hidden="true" />
 
           <div className="canvas-label canvas-label--left">
             <span className="canvas-label__rule" />
             <span>RYUGEN</span>
             <span className="canvas-label__divider">/</span>
-            <span className="canvas-label__muted">CREATIVE PORTFOLIO</span>
+            <span className="canvas-label__muted">ABOUT ME / CREATIVE WORK</span>
           </div>
           <div className="canvas-label canvas-label--right">
-            <span className="canvas-label__muted">INDEPENDENT CREATIVE DEVELOPER</span>
+            <span className="canvas-label__muted">GAMES / 3D / WEB APPS</span>
             <span className="canvas-label__rule" />
           </div>
 
@@ -966,6 +896,30 @@ export default function PortfolioPage() {
               </button>
             ))}
           </nav>
+
+          <audio
+            ref={ambientAudioRef}
+            className="ambient-audio-source"
+            src="/audio/atlasaudio-drone-ambient-518685.mp3"
+            loop
+            preload="none"
+          />
+          <audio
+            ref={uiSoundRef}
+            className="ambient-audio-source"
+            src="/audio/juniorsoundays-ui-sound-56-527824.mp3"
+            preload="auto"
+          />
+          <button
+            type="button"
+            className={`ambient-audio${soundEnabled ? " is-playing" : ""}`}
+            aria-label={soundEnabled ? "BGMを停止" : "BGMを再生"}
+            aria-pressed={soundEnabled}
+            onClick={toggleAmbientAudio}
+          >
+            <span className="ambient-audio__indicator" aria-hidden="true" />
+            <span>{soundEnabled ? "SOUND ON" : "SOUND OFF"}</span>
+          </button>
 
           {/* Scroll hint */}
           <div className={`scroll-hint ${hintVisible ? "" : "hidden"}`}>
@@ -986,6 +940,7 @@ export default function PortfolioPage() {
               event.preventDefault();
               event.stopPropagation();
               suppressClickRef.current = false;
+              dragMovedRef.current = false;
               if (suppressClickTimerRef.current !== null) {
                 window.clearTimeout(suppressClickTimerRef.current);
                 suppressClickTimerRef.current = null;
@@ -993,56 +948,79 @@ export default function PortfolioPage() {
             }}
             id="infinite-canvas"
           >
-            <div className={`cell-layer${categoryTransitioning ? " is-transitioning" : ""}`}>
-              {visibleCells.map(({ key, item, x, y, w, h, blur, brightness, opacity }, cellIndex) => (
-                <div
-                  key={key}
-                  className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "status", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
-                  style={{
-                    width: w,
-                    height: h,
-                    transform: `translate(${x}px, ${y}px)`,
-                    filter: `blur(${blur}px) brightness(${brightness})`,
-                    opacity,
-                  }}
-                >
+            {categoryTransitionPhase === "exit" && outgoingCells && (
+              <div key={`outgoing-${categoryTransitionRun}`} className="cell-layer is-exiting" aria-hidden="true">
+                {outgoingCells.map(({ key, item, x, y, w, h, blur, brightness, opacity }) => (
                   <div
-                    className="canvas-cell__reveal"
-                    style={{ animationDelay: categoryTransitioning ? `${Math.min(cellIndex * 12, 220)}ms` : undefined }}
+                    key={key}
+                    className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "apps", "visualizer", "spacer", "status", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
+                    style={{
+                      width: w,
+                      height: h,
+                      transform: `translate(${x}px, ${y}px)`,
+                      filter: `blur(${blur}px) brightness(${brightness})`,
+                      opacity,
+                    }}
                   >
-                    <CellContent
-                      item={item}
-                      imageSizes={`${Math.ceil(w)}px`}
-                      onProjectSelect={selectProject}
-                    />
+                    <div className="canvas-cell__reveal">
+                      <CellContent item={item} imageSizes={`${Math.ceil(w)}px`} onProjectSelect={selectProject} audioAnalyser={audioAnalyser} soundEnabled={soundEnabled} brandVariant={displayCategory} />
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
+            {(categoryTransitionPhase === "enter" || categoryTransitionPhase === "idle") && (
+              <div key={`incoming-${categoryTransitionRun}`} className={`cell-layer${categoryTransitionPhase === "enter" ? " is-entering" : ""}`}>
+                {visibleCells.map(({ key, item, x, y, w, h, blur, brightness, opacity }) => (
+                  <div
+                    key={key}
+                    className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "apps", "visualizer", "spacer", "status", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
+                    style={{
+                      width: w,
+                      height: h,
+                      transform: `translate(${x}px, ${y}px)`,
+                      filter: `blur(${blur}px) brightness(${brightness})`,
+                      opacity,
+                    }}
+                  >
+                    <div className="canvas-cell__reveal">
+                      <CellContent
+                        item={item}
+                        imageSizes={`${Math.ceil(w)}px`}
+                        onProjectSelect={selectProject}
+                        audioAnalyser={audioAnalyser}
+                        soundEnabled={soundEnabled}
+                        brandVariant={displayCategory}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}
       {activeProject && (
         <ProjectLightbox item={activeProject} onClose={() => setActiveProject(null)} />
       )}
-      {easterEggOpen && (
-        <div className="easter-egg" role="presentation" onClick={() => setEasterEggOpen(false)}>
-          <section
-            className="easter-egg__panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="easter-egg-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button type="button" className="easter-egg__close" aria-label="閉じる" onClick={() => setEasterEggOpen(false)}>×</button>
-            <div className="easter-egg__heading">
-              <span className="easter-egg__eyebrow">AFTER HOURS / 01</span>
-              <h2 id="easter-egg-title">迷路</h2>
-              <p>入口から出口まで、通路を見つけてください。</p>
-            </div>
-            <MazeAnimation />
-            <span className="easter-egg__signature">RYUGEN / GENERATIVE STUDY</span>
-          </section>
+      {starfallActive && (
+        <div key={starfallRun} className="starfall-overlay" aria-hidden="true">
+          {Array.from({ length: 28 }, (_, index) => (
+            <span
+              key={index}
+              className="starfall-meteor"
+              style={{
+                "--star-x": `${(index * 37 + 9) % 100}%`,
+                "--star-y": `${(index * 53 + 5) % 78}%`,
+                "--star-angle": `${20 + (index * 17) % 29}deg`,
+                "--star-length": `${72 + (index * 31) % 90}px`,
+                "--star-end-x": `${34 + (index * 13) % 31}vw`,
+                "--star-delay": `${index * 0.15 + ((index * 11) % 5) * 0.08}s`,
+                "--star-duration": `${1.45 + (index % 6) * 0.21}s`,
+                "--star-tint": index % 7 === 0 ? "198, 166, 107" : index % 5 === 0 ? "180, 211, 226" : "243, 238, 229",
+              } as CSSProperties}
+            />
+          ))}
         </div>
       )}
     </>

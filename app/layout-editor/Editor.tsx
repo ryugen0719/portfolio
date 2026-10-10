@@ -16,15 +16,16 @@ const initialPlacements = resolveGridPlacements(
 const MIN_ROWS = gridLayout.minRows;
 const CELL_HEIGHT = 146;
 
-function labelFor(id: string) {
-  const item = itemsRegistry[id];
+function labelFor(id: string, itemId = id) {
+  if (itemId === "countdown") return "Countdown to 2027";
+  const item = itemsRegistry[itemId];
   if (item?.type === "project") return item.title;
   if (item?.type === "socialLink") return item.name;
-  return id.replaceAll("-", " ");
+  return itemId.replaceAll("-", " ");
 }
 
-function imageFor(id: string) {
-  const item = itemsRegistry[id];
+function imageFor(id: string, itemId = id) {
+  const item = itemsRegistry[itemId];
   return item?.type === "project" ? item.image : null;
 }
 
@@ -41,12 +42,13 @@ export default function LayoutEditorPage() {
     ...placements.map((placement) => placement.row + (placement.rowSpan ?? 1)),
   ) + 2;
   const minColumns = Math.max(1, ...placements.map((placement) => placement.column + (placement.columnSpan ?? 1)));
-  const placedIds = new Set(placements.map((placement) => placement.id));
+  const placedIds = new Set(placements.map((placement) => placement.itemId ?? placement.id));
   const unplaced = Object.keys(itemsRegistry).filter((id) => !placedIds.has(id));
   const layoutCode = useMemo(() => {
     const ordered = [...placements].sort((a, b) => a.row - b.row || a.column - b.column);
     const rowsCode = ordered.map((placement) => {
       const span = [
+        placement.itemId ? `itemId: "${placement.itemId}"` : "",
         placement.columnSpan && placement.columnSpan !== 1 ? `columnSpan: ${placement.columnSpan}` : "",
         placement.rowSpan && placement.rowSpan !== 1 ? `rowSpan: ${placement.rowSpan}` : "",
       ].filter(Boolean);
@@ -70,10 +72,15 @@ export default function LayoutEditorPage() {
     });
   }
 
-  function firstOpenCell(id: string) {
+  function firstOpenCell(width = 1, height = 1) {
     for (let row = 0; row < rows + 10; row++) {
       for (let column = 0; column < columns; column++) {
-        if (canPlace(id, column, row)) return { column, row };
+        if (column + width > columns) continue;
+        const overlaps = placements.some((other) =>
+          column < other.column + (other.columnSpan ?? 1) && column + width > other.column &&
+          row < other.row + (other.rowSpan ?? 1) && row + height > other.row,
+        );
+        if (!overlaps) return { column, row };
       }
     }
     return null;
@@ -89,9 +96,25 @@ export default function LayoutEditorPage() {
   }
 
   function addItem(id: string) {
-    const open = firstOpenCell(id);
+    const open = firstOpenCell();
     if (!open) return;
     setPlacements((current) => [...current, { id, ...open }]);
+    setSelectedId(id);
+    setCopied(false);
+  }
+
+  function duplicateSelected() {
+    if (!selected) return;
+    const sourceId = selected.itemId ?? selected.id;
+    const open = firstOpenCell(selected.columnSpan ?? 1, selected.rowSpan ?? 1);
+    if (!open) return;
+    const nextId = (current: GridPlacement[]) => {
+      let number = 2;
+      while (current.some((placement) => placement.id === `${sourceId}__${number}`)) number++;
+      return `${sourceId}__${number}`;
+    };
+    const id = nextId(placements);
+    setPlacements((current) => [...current, { ...selected, ...open, id, itemId: sourceId }]);
     setSelectedId(id);
     setCopied(false);
   }
@@ -143,7 +166,7 @@ export default function LayoutEditorPage() {
     <main className="layout-editor">
       <header className="layout-editor__header">
         <div>
-          <p className="layout-editor__eyebrow">RYUGEN / PORTFOLIO TOOLS</p>
+          <p className="layout-editor__eyebrow">RYUGEN / PROFILE SITE TOOLS</p>
           <h1>Grid Layout Editor</h1>
           <p className="layout-editor__description">作品をドラッグして、展示の並びとサイズを調整します。</p>
         </div>
@@ -204,7 +227,7 @@ export default function LayoutEditorPage() {
               })}
 
               {placements.map((placement) => {
-                const image = imageFor(placement.id);
+                const image = imageFor(placement.id, placement.itemId);
                 return (
                   <button
                     type="button"
@@ -223,9 +246,9 @@ export default function LayoutEditorPage() {
                     }}
                     onDragEnd={() => setDraggedId(null)}
                   >
-                    {image ? <Image src={image} alt="" fill sizes="240px" /> : <span className="layout-editor__tile-monogram">{labelFor(placement.id).slice(0, 2).toUpperCase()}</span>}
+                    {image ? <Image src={image} alt="" fill sizes="240px" /> : <span className="layout-editor__tile-monogram">{labelFor(placement.id, placement.itemId).slice(0, 2).toUpperCase()}</span>}
                     <span className="layout-editor__tile-shade" />
-                    <span className="layout-editor__tile-label">{labelFor(placement.id)}</span>
+                    <span className="layout-editor__tile-label">{labelFor(placement.id, placement.itemId)}</span>
                     <span className="layout-editor__tile-coordinate">{placement.column + 1}, {placement.row + 1}</span>
                   </button>
                 );
@@ -240,7 +263,7 @@ export default function LayoutEditorPage() {
             <p className="layout-editor__eyebrow">SELECTED ITEM</p>
             {selected ? (
               <>
-                <h2>{labelFor(selected.id)}</h2>
+                <h2>{labelFor(selected.id, selected.itemId)}</h2>
                 <p className="layout-editor__coordinates">列 {selected.column + 1} ・ 行 {selected.row + 1}</p>
                 <div className="layout-editor__control-group">
                   <span>横幅</span>
@@ -260,7 +283,8 @@ export default function LayoutEditorPage() {
                   <button type="button" onClick={() => moveTo(selected.id, selected.column + 1, selected.row)}>右へ</button>
                   <button type="button" onClick={() => moveTo(selected.id, selected.column, selected.row + 1)}>下へ</button>
                 </div>
-                <button type="button" className="layout-editor__text-button" onClick={unplaceSelected}>グリッドから外す</button>
+                <button type="button" className="layout-editor__text-button" onClick={duplicateSelected}>カードを複製</button>
+                <button type="button" className="layout-editor__text-button" onClick={unplaceSelected}>カードを削除</button>
               </>
             ) : <p className="layout-editor__empty-state">配置したい作品を選択してください。</p>}
           </section>
