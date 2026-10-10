@@ -1,20 +1,29 @@
 "use client";
 
 import Image from "next/image";
-import { GridItem, ProjectItem } from "../types";
-import { socialLinks, pcSpecs, skills } from "../data";
+import { useEffect, useRef } from "react";
+import { GridItem, ProjectItem, SocialLinkItem } from "../types";
+import { pcSpecs, skills } from "../data";
 
 /* ════════════════════════════════════════════
    Cell Content Router
    ════════════════════════════════════════════ */
-export function CellContent({ item }: { item: GridItem }) {
+export function CellContent({
+  item,
+  imageSizes,
+  onProjectSelect,
+}: {
+  item: GridItem;
+  imageSizes: string;
+  onProjectSelect: (project: ProjectItem, trigger: HTMLButtonElement) => void;
+}) {
   switch (item.type) {
     case "project":
-      return <ProjectCell item={item} />;
+      return <ProjectCell item={item} imageSizes={imageSizes} onSelect={onProjectSelect} />;
     case "about":
       return <AboutCell />;
-    case "links":
-      return <LinksCell />;
+    case "socialLink":
+      return <SocialLinkCell item={item} />;
     case "specs":
       return <SpecsCell />;
     case "skills":
@@ -37,28 +46,28 @@ export function CellContent({ item }: { item: GridItem }) {
    ════════════════════════════════════════════ */
 
 /* ── Project ── */
-function ProjectCell({ item }: { item: ProjectItem }) {
-  const isDummy = item.link === "#";
+function ProjectCell({
+  item,
+  imageSizes,
+  onSelect,
+}: {
+  item: ProjectItem;
+  imageSizes: string;
+  onSelect: (project: ProjectItem, trigger: HTMLButtonElement) => void;
+}) {
   return (
-    <a
-      href={item.link}
-      target={isDummy ? undefined : "_blank"}
-      rel={isDummy ? undefined : "noopener noreferrer"}
+    <button
+      type="button"
       className="cell-project"
-      onClick={(e) => {
-        // Prevent navigation if it was a drag or if it's a dummy link
-        const wasDrag = document
-          .querySelector(".infinite-canvas")
-          ?.classList.contains("is-dragging");
-        if (wasDrag || isDummy) e.preventDefault();
-      }}
+      onClick={(event) => onSelect(item, event.currentTarget)}
     >
       <div className="cell-project__img">
         <Image
           src={item.image}
           alt={item.title}
           fill
-          sizes="310px"
+          quality={100}
+          sizes={imageSizes}
           style={{ objectFit: "cover" }}
           draggable={false}
         />
@@ -77,7 +86,70 @@ function ProjectCell({ item }: { item: ProjectItem }) {
           </div>
         </div>
       </div>
-    </a>
+    </button>
+  );
+}
+
+export function ProjectLightbox({
+  item,
+  onClose,
+}: {
+  item: ProjectItem;
+  onClose: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="project-lightbox" onClick={onClose}>
+      <section
+        className="project-lightbox__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-lightbox-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          ref={closeButtonRef}
+          type="button"
+          className="project-lightbox__close"
+          aria-label="作品の詳細を閉じる"
+          onClick={onClose}
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+        <div className="project-lightbox__media">
+          <Image
+            src={item.image}
+            alt={item.title}
+            fill
+            quality={100}
+            sizes="(max-width: 760px) 94vw, 1100px"
+            style={{ objectFit: "contain" }}
+          />
+        </div>
+        <div className="project-lightbox__content">
+          <div className="project-lightbox__heading">
+            <span className="cell-eyebrow">{item.category} / SELECTED WORK</span>
+            <h2 id="project-lightbox-title">{item.title}</h2>
+            <p>{item.description}</p>
+          </div>
+          <div className="cell-project__tags">
+            {item.tags.map((tag) => (
+              <span key={tag.label} className="cell-tag">{tag.label}</span>
+            ))}
+          </div>
+          {item.link !== "#" && (
+            <a className="project-lightbox__external" href={item.link} target="_blank" rel="noopener noreferrer">
+              Open project <span aria-hidden="true">↗</span>
+            </a>
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -85,10 +157,8 @@ function ProjectCell({ item }: { item: ProjectItem }) {
 function AboutCell() {
   return (
     <div className="cell-info cell-about">
-      <h2>
-        <span className="cell-info__icon">👋</span>
-        About Me
-      </h2>
+      <span className="cell-eyebrow">01 / PROFILE</span>
+      <h2>About Me</h2>
       <p>
         ゲーム開発、クリエイティブコーディング、Webアプリ制作を行っています。
         テクノロジーとアートの交差点で新しい体験を創ることが好きです。
@@ -97,35 +167,23 @@ function AboutCell() {
   );
 }
 
-/* ── Links ── */
-function LinksCell() {
+/* ── Social Link ── */
+function SocialLinkCell({ item }: { item: SocialLinkItem }) {
   return (
-    <div className="cell-links-cluster">
-      {socialLinks.map((l, i) => (
-        <a
-          key={l.name}
-          href={l.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`cell-link-box ${i === 4 ? "span-2" : ""}`}
-          onClick={(e) => {
-            const wasDrag = document
-              .querySelector(".infinite-canvas")
-              ?.classList.contains("is-dragging");
-            if (wasDrag) {
-              e.preventDefault();
-            } else {
-              e.stopPropagation();
-            }
-          }}
-        >
-          <div className={`cell-link-icon cell-link-icon--${l.cls}`}>
-            {l.icon}
-          </div>
-          <span className="cell-link-name">{l.name}</span>
-        </a>
-      ))}
-    </div>
+    <a
+      href={item.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="cell-social-link"
+      aria-label={`${item.name} ${item.handle} を開く`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <span className="cell-social-link__eyebrow">SOCIAL / NETWORK</span>
+      <span className="cell-social-link__icon" aria-hidden="true">{item.icon}</span>
+      <span className="cell-social-link__name">{item.name}</span>
+      <span className="cell-social-link__handle">{item.handle}</span>
+      <span className="cell-social-link__arrow" aria-hidden="true">↗</span>
+    </a>
   );
 }
 
@@ -133,10 +191,8 @@ function LinksCell() {
 function SpecsCell() {
   return (
     <div className="cell-info cell-specs">
-      <h2>
-        <span className="cell-info__icon">🖥</span>
-        PC Specs
-      </h2>
+      <span className="cell-eyebrow">02 / WORKSTATION</span>
+      <h2>PC Specs</h2>
       <ul className="spec-list">
         {pcSpecs.map((s) => (
           <li key={s.label} className="spec-row">
@@ -152,11 +208,9 @@ function SpecsCell() {
 /* ── Skills ── */
 function SkillsCell() {
   return (
-    <div className="cell-info">
-      <h2>
-        <span className="cell-info__icon">🛠</span>
-        Skills
-      </h2>
+    <div className="cell-info cell-skills">
+      <span className="cell-eyebrow">03 / TOOLKIT</span>
+      <h2>Skills</h2>
       <div className="skills-wrap">
         {skills.map((s) => (
           <span key={s} className="skill-chip">
@@ -196,13 +250,14 @@ function QuoteCell() {
 /* ── Brand ── */
 function BrandCell() {
   return (
-    <div className="cell-info" style={{ background: "transparent", border: "none", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 32 }}>
-      <div className="center-brand__logo" style={{ width: 150, height: 150, margin: 0, flexShrink: 0 }}>
-        <Image src="/Logo.jpg" alt="Ryugen Logo" width={150} height={150} style={{ objectFit: "cover" }} />
+    <div className="brand-cell">
+      <div className="brand-cell__logo">
+        <Image src="/Logo.jpg" alt="Ryugen Logo" width={150} height={150} sizes="150px" style={{ objectFit: "cover" }} />
       </div>
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        <h1 style={{ fontSize: "3.4rem", fontWeight: 900, background: "linear-gradient(135deg, var(--text-primary), var(--text-muted))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", margin: 0, textShadow: "0 8px 30px rgba(0,0,0,0.7)", letterSpacing: "0.02em" }}>RYUGEN</h1>
-        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.15em", marginTop: 4 }}>Creative Developer</p>
+      <div className="brand-cell__copy">
+        <span className="cell-eyebrow">DESIGN / CODE / IMAGE</span>
+        <h1>RYUGEN</h1>
+        <p>Creative Developer</p>
       </div>
     </div>
   );

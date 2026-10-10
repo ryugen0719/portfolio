@@ -1,18 +1,19 @@
-import { GridItem, ProjectItem } from "./types";
+import { GridItem, GridPlacement, ProjectItem } from "./types";
 
 export const projects: ProjectItem[] = [
   {
     type: "project",
+    id: "candy-3d",
     title: "Candy 3D",
     description: "Blenderで制作したポップなキャンディの3Dアート。",
     image: "/works/blender/CANDY.png",
     tags: [{ label: "Blender", color: "orange" }, { label: "3D Art", color: "pink" }],
     category: "3D",
     link: "#",
-    size: "large", // 2x2
   },
   {
     type: "project",
+    id: "umbrella",
     title: "Umbrella",
     description: "和傘をモチーフにした3Dモデリングとライティングの習作。",
     image: "/works/blender/傘.png",
@@ -22,6 +23,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "abstract-cube",
     title: "Abstract Cube",
     description: "幾何学的なキューブの抽象的な表現。",
     image: "/works/blender/cube2.png",
@@ -31,6 +33,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "room-0001",
     title: "Room 0001",
     description: "室内風景の3Dモデリング。光と影の演出。",
     image: "/works/blender/0001.png",
@@ -40,6 +43,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "photography-01",
     title: "Photography #1",
     description: "日常の風景を切り取った一枚。",
     image: "/works/photo/_IMG0083.jpg",
@@ -49,6 +53,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "photography-02",
     title: "Photography #2",
     description: "光と構図を意識した写真作品。",
     image: "/works/photo/_IMG0144.jpg",
@@ -58,6 +63,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "photography-03",
     title: "Photography #3",
     description: "風景のスナップショット。",
     image: "/works/photo/_IMG0174.jpg",
@@ -67,16 +73,17 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "neon-cube",
     title: "Neon Cube",
     description: "ネオンカラーを基調としたキューブのレンダリング。",
     image: "/works/blender/36.png",
     tags: [{ label: "Blender", color: "orange" }, { label: "Neon", color: "cyan" }],
     category: "3D",
     link: "#",
-    size: "wide", // 2x1
   },
   {
     type: "project",
+    id: "color-adjust",
     title: "Color Adjust",
     description: "3Dレンダリング後の合成と色調整のテスト。",
     image: "/works/blender/合成色調整.png",
@@ -86,6 +93,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "photography-04",
     title: "Photography #4",
     description: "自然の風景写真。",
     image: "/works/photo/IMG20260405132205.jpg",
@@ -95,6 +103,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "lighting-test",
     title: "Lighting Test",
     description: "3D空間におけるライティングの実験。",
     image: "/works/blender/Light.png",
@@ -104,6 +113,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "room-0420",
     title: "Room 0420",
     description: "3Dで構築されたインテリアデザイン。",
     image: "/works/blender/0420.png",
@@ -113,6 +123,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "testing-45",
     title: "Testing 45",
     description: "モデリングのテストショット。",
     image: "/works/blender/45.png",
@@ -122,6 +133,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "photography-05",
     title: "Photography #5",
     description: "被写界深度を活かした写真。",
     image: "/works/photo/_IMG0184.jpg",
@@ -131,6 +143,7 @@ export const projects: ProjectItem[] = [
   },
   {
     type: "project",
+    id: "room-0006",
     title: "Room 0006",
     description: "別アングルからの室内レンダリング。",
     image: "/works/blender/0006.png",
@@ -147,11 +160,11 @@ const IconSc = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="curre
 const IconItch = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.5 4.5l-1.5 2.75v11.5c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2v-11.5l-1.5-2.75h-19zm8.5 2h2v2h-2v-2zm-5.5 0h2v2h-2v-2zm11 0h2v2h-2v-2zM4 11.5h16v6h-16v-6zm3 1.5v3h2v-3H7zm6 0v3h2v-3h-2z"/></svg>;
 
 export const socialLinks = [
-  { name: "YouTube", handle: "@ryugen0719", url: "https://www.youtube.com/@ryugen0719", icon: <IconYT />, cls: "yt" },
-  { name: "Scratch", handle: "ryugen0719", url: "https://scratch.mit.edu/users/ryugen0719/", icon: <IconSc />, cls: "sc" },
-  { name: "Instagram", handle: "@ryugen0719", url: "https://www.instagram.com/ryugen0719/", icon: <IconIG />, cls: "ig" },
-  { name: "itch.io", handle: "ryugen0719", url: "https://ryugen0719.itch.io/", icon: <IconItch />, cls: "it" },
-  { name: "GitHub", handle: "ryugen0719", url: "https://github.com/ryugen0719", icon: <IconGH />, cls: "gh" },
+  { id: "social-youtube", type: "socialLink" as const, name: "YouTube", handle: "@ryugen0719", url: "https://www.youtube.com/@ryugen0719", icon: <IconYT /> },
+  { id: "social-scratch", type: "socialLink" as const, name: "Scratch", handle: "ryugen0719", url: "https://scratch.mit.edu/users/ryugen0719/", icon: <IconSc /> },
+  { id: "social-instagram", type: "socialLink" as const, name: "Instagram", handle: "@ryugen0719", url: "https://www.instagram.com/ryugen0719/", icon: <IconIG /> },
+  { id: "social-itch", type: "socialLink" as const, name: "itch.io", handle: "ryugen0719", url: "https://ryugen0719.itch.io/", icon: <IconItch /> },
+  { id: "social-github", type: "socialLink" as const, name: "GitHub", handle: "ryugen0719", url: "https://github.com/ryugen0719", icon: <IconGH /> },
 ];
 
 export const pcSpecs = [
@@ -163,36 +176,63 @@ export const pcSpecs = [
 ];
 
 export const skills = [
-  "JavaScript", "TypeScript", "React", "Next.js",
-  "Scratch", "Unity", "C#", "HTML/CSS",
-  "Python", "Blender", "Git", "Node.js",
+  "Scratch", "HTML/CSS",
+  "Python", "Blender", "Git", 
 ];
 
-/* ── Layout Registry ── */
+/* ── Content Registry ── */
 export const itemsRegistry: Record<string, GridItem> = {
-  p0: projects[0], p1: projects[1], p2: projects[2], p3: projects[3], p4: projects[4],
-  p5: projects[5], p6: projects[6], p7: projects[7], p8: projects[8], p9: projects[9],
-  p10: projects[10], p11: projects[11], p12: projects[12], p13: projects[13], p14: projects[14],
+  ...Object.fromEntries(projects.map((project) => [project.id, project])),
+  ...Object.fromEntries(socialLinks.map((link) => [link.id, link])),
   about: { type: "about" },
   brand: { type: "brand" },
   skills: { type: "skills" },
   specs: { type: "specs" },
   quote: { type: "quote" },
-  links: { type: "links" },
   status: { type: "status" },
   empty: { type: "empty" },
 };
 
-/* ── Visual Grid Layout ──
-   ここでグリッドの配置を視覚的に編集できます。
-   同じIDを複数マスに配置すると、そのマスをまたぐ大きな要素になります。
-   (例: p0 は 2x2マス、brand と p7 は 2x1マス)
-*/
-export const gridLayout = [
-  ["p0",     "p0",     "about", "p1",    "p2"],
-  ["p0",     "p0",     "p3",    "p4",    "p5"],
-  ["p6",     "brand",  "brand", "p7",    "p7"],
-  ["skills", "p8",     "p9",    "specs", "p10"],
-  ["p11",    "p12",    "quote", "p13",   "p14"],
-  ["links",  "status", "empty", "empty", "empty"],
-];
+/*
+ * Grid placement guide
+ * - Increase columns to widen the repeating canvas.
+ * - Move a tile by changing column / row (zero-based).
+ * - Resize it with columnSpan / rowSpan; omitted values are 1.
+ * - Keep every placement inside the configured column count.
+ * - Add new projects to autoFlow to place them in the next available grid cells.
+ * - For precise control, remove the id from autoFlow and add it to placements.
+ */
+export const gridLayout = {
+columns: 5,
+minRows: 6,
+autoFlow: [],
+placements: [
+    { id: "candy-3d", column: 0, row: 0, columnSpan: 2, rowSpan: 2 },
+    { id: "about", column: 2, row: 0 },
+    { id: "umbrella", column: 3, row: 0 },
+    { id: "abstract-cube", column: 4, row: 0 },
+    { id: "room-0001", column: 2, row: 1 },
+    { id: "photography-01", column: 3, row: 1 },
+    { id: "photography-02", column: 4, row: 1 },
+    { id: "photography-03", column: 0, row: 2 },
+    { id: "brand", column: 1, row: 2, columnSpan: 2 },
+    { id: "neon-cube", column: 3, row: 2 },
+    { id: "status", column: 4, row: 2 },
+    { id: "skills", column: 0, row: 3 },
+    { id: "social-instagram", column: 1, row: 3 },
+    { id: "photography-04", column: 2, row: 3 },
+    { id: "specs", column: 3, row: 3 },
+    { id: "lighting-test", column: 4, row: 3 },
+    { id: "social-youtube", column: 0, row: 4 },
+    { id: "testing-45", column: 1, row: 4 },
+    { id: "quote", column: 2, row: 4 },
+    { id: "social-itch", column: 3, row: 4 },
+    { id: "room-0006", column: 4, row: 4 },
+    { id: "room-0420", column: 0, row: 5 },
+    { id: "social-scratch", column: 1, row: 5 },
+    { id: "color-adjust", column: 2, row: 5 },
+    { id: "photography-05", column: 3, row: 5 },
+    { id: "social-github", column: 4, row: 5 },
+],
+} satisfies { columns: number; minRows: number; autoFlow: string[]; placements: GridPlacement[] };
+
