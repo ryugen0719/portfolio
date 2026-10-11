@@ -5,6 +5,7 @@ export type ProjectItem = {
   id: string;
   title: string;
   description: string;
+  photoSettings?: string;
   image: string;
   tags: { label: string; color: string }[];
   category: string;
@@ -37,7 +38,7 @@ export type SpacerItem = {
   variant: "orbit" | "diamond" | "rings" | "grid" | "radial";
 };
 export type InfoItem = {
-  type: "about" | "specs" | "skills" | "apps" | "visualizer" | "status" | "quote" | "brand" | "empty" | "countdown";
+  type: "about" | "specs" | "skills" | "apps" | "visualizer" | "status" | "quote" | "brand" | "empty" | "countdown" | "iss";
 };
 
 export type GridItem = ProjectItem | SocialLinkItem | StatItem | SpacerItem | InfoItem;

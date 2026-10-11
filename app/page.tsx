@@ -97,7 +97,7 @@ function buildMobileItems(category: GridCategory): GridItem[] {
   const profileItems = ["about", "skills", "specs", "apps", "visualizer"]
     .map((id) => itemsRegistry[id])
     .filter((item): item is GridItem => Boolean(item));
-  const closingItems = ["status", "countdown", "quote", "stat"]
+  const closingItems = ["iss", "countdown", "status", "quote", "stat"]
     .map((id) => itemsRegistry[id])
     .filter((item): item is GridItem => Boolean(item));
 
@@ -207,7 +207,9 @@ const STEP_X = CELL_W + GAP;
 const STEP_Y = CELL_H + GAP;
 const CONTENT_W = COLS * STEP_X;
 const CONTENT_H = ROWS * STEP_Y;
-const FRICTION = 0.92;
+const FRICTION = 0.94;
+const DRAG_FRICTION = 0.975;
+const WHEEL_FRICTION = 0.965;
 const WHEEL_SPEED = 1.2;
 const MIN_CANVAS_ZOOM = 0.55;
 const MAX_CANVAS_ZOOM = 1.75;
@@ -439,6 +441,7 @@ export default function PortfolioPage() {
   const cameraRef = useRef({ x: 0, y: 0 });
   const categoryTransitionTimerRef = useRef<number | null>(null);
   const velRef = useRef({ x: 0, y: 0 });
+  const momentumFrictionRef = useRef(FRICTION);
   const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef({
     mode: "idle" as "idle" | "pan" | "pinch",
@@ -728,6 +731,33 @@ export default function PortfolioPage() {
     }, CATEGORY_EXIT_MS);
   }, [activeCategory, categoryTransitionPhase, isMobile, playUiSound]);
 
+  /* ── Momentum animation ── */
+  const startMomentum = useCallback((friction: number) => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    const animate = () => {
+      velRef.current.x *= momentumFrictionRef.current;
+      velRef.current.y *= momentumFrictionRef.current;
+
+      if (
+        Math.abs(velRef.current.x) < 0.3 &&
+        Math.abs(velRef.current.y) < 0.3
+      ) {
+        velRef.current = { x: 0, y: 0 };
+        rafRef.current = null;
+        return;
+      }
+
+      cameraRef.current.x -= velRef.current.x;
+      cameraRef.current.y -= velRef.current.y;
+      setTick((t) => t + 1);
+      rafRef.current = requestAnimationFrame(animate);
+    };
+
+    momentumFrictionRef.current = friction;
+    rafRef.current = requestAnimationFrame(animate);
+  }, []);
+
   /* ── Wheel ── */
   const handleWheel = useCallback(
     (e: WheelEvent) => {
@@ -754,16 +784,23 @@ export default function PortfolioPage() {
       }
       const dx = (e.deltaX || (e.shiftKey ? e.deltaY : 0)) * WHEEL_SPEED;
       const dy = (e.shiftKey ? 0 : e.deltaY) * WHEEL_SPEED;
-      cameraRef.current.x += dx / zoomRef.current;
-      cameraRef.current.y += dy / zoomRef.current;
-      setTick((t) => t + 1);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        cameraRef.current.x += dx / zoomRef.current;
+        cameraRef.current.y += dy / zoomRef.current;
+        setTick((t) => t + 1);
+      } else {
+        const wheelInertia = 0.16;
+        velRef.current.x -= (dx / zoomRef.current) * wheelInertia;
+        velRef.current.y -= (dy / zoomRef.current) * wheelInertia;
+        startMomentum(WHEEL_FRICTION);
+      }
 
       if (!hasScrolledRef.current) {
         hasScrolledRef.current = true;
         setHintVisible(false);
       }
     },
-    [],
+    [startMomentum],
   );
 
   useEffect(() => {
@@ -772,32 +809,6 @@ export default function PortfolioPage() {
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
-
-  /* ── Momentum animation ── */
-  const startMomentum = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
-    const animate = () => {
-      velRef.current.x *= FRICTION;
-      velRef.current.y *= FRICTION;
-
-      if (
-        Math.abs(velRef.current.x) < 0.3 &&
-        Math.abs(velRef.current.y) < 0.3
-      ) {
-        velRef.current = { x: 0, y: 0 };
-        rafRef.current = null;
-        return;
-      }
-
-      cameraRef.current.x -= velRef.current.x;
-      cameraRef.current.y -= velRef.current.y;
-      setTick((t) => t + 1);
-      rafRef.current = requestAnimationFrame(animate);
-    };
-
-    rafRef.current = requestAnimationFrame(animate);
-  }, []);
 
   /* ── Drag handlers ── */
   const onPointerDown = useCallback(
@@ -882,6 +893,9 @@ export default function PortfolioPage() {
     if (Math.hypot(dx, dy) > 6) {
       dragMovedRef.current = true;
       setIsDragging(true);
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
     }
     cameraRef.current.x = gesture.startCamera.x - dx / gesture.startZoom;
     cameraRef.current.y = gesture.startCamera.y - dy / gesture.startZoom;
@@ -921,16 +935,24 @@ export default function PortfolioPage() {
         dragMovedRef.current = false;
         suppressClickTimerRef.current = null;
       }, 250);
-      if (!hadPinch) startMomentum();
+      if (!hadPinch) startMomentum(DRAG_FRICTION);
     }
   }, [startMomentum]);
 
   /* ── Calculate visible cells ── */
   const cam = cameraRef.current;
   const zoom = zoomRef.current;
+  const particleParallaxStyle = {
+    "--particle-far-x": `${(-cam.x * zoom * 0.08).toFixed(2)}px`,
+    "--particle-far-y": `${(-cam.y * zoom * 0.08).toFixed(2)}px`,
+    "--particle-mid-x": `${(-cam.x * zoom * 0.35).toFixed(2)}px`,
+    "--particle-mid-y": `${(-cam.y * zoom * 0.35).toFixed(2)}px`,
+    "--particle-near-x": `${(-cam.x * zoom * 0.85).toFixed(2)}px`,
+    "--particle-near-y": `${(-cam.y * zoom * 0.85).toFixed(2)}px`,
+  } as CSSProperties;
   const worldViewportWidth = vpSize.w / zoom;
   const worldViewportHeight = vpSize.h / zoom;
-  const buffer = 2;
+  const buffer = 1;
 
   const startCol = Math.floor(cam.x / STEP_X) - buffer;
   const endCol = Math.ceil((cam.x + worldViewportWidth) / STEP_X) + buffer;
@@ -996,8 +1018,11 @@ export default function PortfolioPage() {
         <>
           {/* Background layers */}
           <div className="canvas-bg" />
-          <div className="canvas-grid-tex" />
-          <div id="particles-js" className="particles-layer" aria-hidden="true">
+          <div className="canvas-grid-tex" style={particleParallaxStyle} />
+          <div id="particles-js" className="particles-layer" style={particleParallaxStyle} aria-hidden="true">
+            <span className="parallax-particles parallax-particles--far" />
+            <span className="parallax-particles parallax-particles--mid" />
+            <span className="parallax-particles parallax-particles--near" />
             <span className="ambient-meteor" />
           </div>
           <Script
@@ -1013,7 +1038,7 @@ export default function PortfolioPage() {
 
               particleWindow.particlesJS("particles-js", {
                 particles: {
-                  number: { value: window.matchMedia("(max-width: 767px)").matches ? 28 : 72, density: { enable: true, value_area: 1000 } },
+                  number: { value: window.matchMedia("(max-width: 767px)").matches ? 42 : 112, density: { enable: true, value_area: 1000 } },
                   color: { value: ["#d8cdbb", "#c6a66b", "#f3eee5"] },
                   shape: { type: "circle" },
                   opacity: { value: 0.42, random: true, anim: { enable: true, speed: 0.45, opacity_min: 0.12, sync: false } },
@@ -1169,6 +1194,7 @@ export default function PortfolioPage() {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onLostPointerCapture={onPointerUp}
+            onDragStart={(event) => event.preventDefault()}
             onClickCapture={(event) => {
               if (!suppressClickRef.current) return;
               event.preventDefault();
@@ -1187,7 +1213,7 @@ export default function PortfolioPage() {
                 {outgoingCells.map(({ key, item, x, y, w, h, blur, brightness, opacity }) => (
                   <div
                     key={key}
-                    className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "apps", "visualizer", "spacer", "status", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
+                    className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "apps", "visualizer", "spacer", "status", "countdown", "iss", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
                     style={{
                       width: w,
                       height: h,
@@ -1209,7 +1235,7 @@ export default function PortfolioPage() {
                 {visibleCells.map(({ key, item, x, y, w, h, blur, brightness, opacity }) => (
                   <div
                     key={key}
-                    className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "apps", "visualizer", "spacer", "status", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
+                    className={`canvas-cell${item.type === "project" ? " canvas-cell--project" : item.type === "socialLink" ? " canvas-cell--social" : item.type === "brand" ? " canvas-cell--brand" : ["about", "specs", "skills", "apps", "visualizer", "spacer", "status", "countdown", "iss", "quote", "stat"].includes(item.type) ? " canvas-cell--text" : ""}`}
                     style={{
                       width: w,
                       height: h,

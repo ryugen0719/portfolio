@@ -1,14 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { GridItem, ProjectItem, SocialLinkItem } from "../types";
 import { favoriteApps, pcSpecs, skills } from "../data";
 
 /* ════════════════════════════════════════════
    Cell Content Router
    ════════════════════════════════════════════ */
-export function CellContent({
+export const CellContent = memo(function CellContent({
   item,
   imageSizes,
   onProjectSelect,
@@ -41,11 +41,13 @@ export function CellContent({
     case "visualizer":
       return <AudioVisualizerCell analyser={audioAnalyser} isPlaying={soundEnabled} animate={presentation !== "list" || soundEnabled} />;
     case "spacer":
-      return <SpacerCell variant={item.variant} />;
+      return <SpacerCell />;
     case "status":
       return <StatusCell />;
     case "countdown":
       return <CountdownCell />;
+    case "iss":
+      return <ISSPositionCell />;
     case "quote":
       return <QuoteCell />;
     case "brand":
@@ -55,7 +57,7 @@ export function CellContent({
     default:
       return null;
   }
-}
+});
 
 /* ════════════════════════════════════════════
    Cell Components
@@ -77,6 +79,7 @@ function ProjectCell({
     <div className="cell-project__overlay">
       <h3>{item.title}</h3>
       <p>{item.description}</p>
+      {item.photoSettings && <p className="cell-project__photo-settings">{item.photoSettings}</p>}
       <div className="cell-project__tags">
         {item.tags.map((tag) => (
           <span
@@ -94,7 +97,9 @@ function ProjectCell({
     <button
       type="button"
       className={`cell-project${presentation === "list" ? " cell-project--list" : ""}`}
-      aria-label={presentation === "list" ? `${item.title}: ${item.description}` : undefined}
+      aria-label={presentation === "list"
+        ? `${item.title}: ${item.description}${item.photoSettings ? ` ${item.photoSettings}` : ""}`
+        : undefined}
       onClick={(event) => onSelect(item, event.currentTarget)}
     >
       <div className="cell-project__img">
@@ -102,7 +107,7 @@ function ProjectCell({
           src={item.image}
           alt={item.title}
           fill
-          quality={100}
+          quality={presentation === "canvas" ? 90 : 75}
           sizes={imageSizes}
           style={{ objectFit: "cover" }}
           draggable={false}
@@ -122,6 +127,11 @@ export function ProjectLightbox({
   onClose: () => void;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const currentImageRef = useRef(item.image);
+  currentImageRef.current = item.image;
+  const [imageState, setImageState] = useState<{ src: string; status: "loaded" | "error" } | null>(null);
+  const imageLoaded = imageState?.src === item.image && imageState.status === "loaded";
+  const imageFailed = imageState?.src === item.image && imageState.status === "error";
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -146,13 +156,33 @@ export function ProjectLightbox({
           <span aria-hidden="true">×</span>
         </button>
         <div className="project-lightbox__media">
+          {!imageLoaded && (
+            <div className="project-lightbox__loader" role="status" aria-live="polite">
+              {imageFailed ? (
+                <span className="project-lightbox__loader-error">画像を読み込めませんでした</span>
+              ) : (
+                <>
+                  <span className="project-lightbox__loader-orbit" aria-hidden="true" />
+                  <span className="project-lightbox__loader-label">読み込み中</span>
+                </>
+              )}
+            </div>
+          )}
           <Image
+            key={item.image}
             src={item.image}
             alt={item.title}
             fill
             quality={100}
             sizes="(max-width: 760px) 94vw, 1100px"
+            className={`project-lightbox__image${imageLoaded ? " is-loaded" : ""}`}
             style={{ objectFit: "contain" }}
+            onLoad={() => {
+              if (currentImageRef.current === item.image) setImageState({ src: item.image, status: "loaded" });
+            }}
+            onError={() => {
+              if (currentImageRef.current === item.image) setImageState({ src: item.image, status: "error" });
+            }}
           />
         </div>
         <div className="project-lightbox__content">
@@ -160,6 +190,7 @@ export function ProjectLightbox({
             <span className="cell-eyebrow">{item.category} / SELECTED WORK</span>
             <h2 id="project-lightbox-title">{item.title}</h2>
             <p>{item.description}</p>
+            {item.photoSettings && <p className="cell-project__photo-settings">{item.photoSettings}</p>}
           </div>
           <div className="cell-project__tags">
             {item.tags.map((tag) => (
@@ -225,6 +256,7 @@ function SocialLinkCell({ item }: { item: SocialLinkItem }) {
           fill
           sizes="280px"
           aria-hidden="true"
+          draggable={false}
         />
       ))}
       <span className="cell-social-link__eyebrow">SOCIAL / NETWORK</span>
@@ -256,15 +288,26 @@ function SpecsCell() {
 
 /* ── Skills ── */
 function SkillsCell() {
+  const groups = [
+    { label: "PROGRAMMING", items: skills.filter((skill) => ["Python", "Scratch"].includes(skill)) },
+    { label: "3D", items: skills.filter((skill) => skill === "Blender") },
+    { label: "WEB", items: skills.filter((skill) => skill === "HTML/CSS") },
+  ];
+
   return (
     <div className="cell-info cell-skills">
       <span className="cell-eyebrow">03 / TOOLKIT</span>
       <h2>Skills</h2>
-      <div className="skills-wrap">
-        {skills.map((s) => (
-          <span key={s} className="skill-chip">
-            {s}
-          </span>
+      <div className="skills-groups">
+        {groups.map((group) => (
+          <div key={group.label} className="skills-group">
+            <span className="skills-group__label">{group.label}</span>
+            <div className="skills-group__items">
+              {group.items.map((skill) => (
+                <span key={skill} className="skill-chip">{skill === "Python" ? "Python · AtCoder" : skill}</span>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -277,10 +320,12 @@ function FavoriteAppsCell() {
     <div className="cell-info cell-apps">
       <span className="cell-eyebrow">04 / FAVORITES</span>
       <h2>Favorite Apps</h2>
-      <p className="favorite-apps-description">普段よく使っているアプリを紹介します。</p>
       <div className="favorite-apps-wrap">
-        {favoriteApps.map((app) => (
-          <span key={app} className="favorite-app-chip">{app}</span>
+        {favoriteApps.map((app, index) => (
+          <span key={app} className="favorite-app-chip">
+            <span className="favorite-app-chip__index">{String(index + 1).padStart(2, "0")}</span>
+            <span className="favorite-app-chip__name">{app}</span>
+          </span>
         ))}
       </div>
     </div>
@@ -339,70 +384,129 @@ function AudioVisualizerCell({ analyser, isPlaying, animate }: { analyser: Analy
   );
 }
 
-/* ── Negative-space motifs ── */
-function SpacerCell({ variant }: { variant: "orbit" | "diamond" | "rings" | "grid" | "radial" }) {
-  return (
-    <div className="spacer-card" aria-hidden="true">
-      <svg className={`spacer-card__graphic spacer-card__graphic--${variant}`} viewBox="0 0 120 120" focusable="false">
-        {variant === "orbit" && (
-          <>
-            <ellipse cx="60" cy="60" rx="38" ry="16" transform="rotate(-34 60 60)" />
-            <ellipse cx="60" cy="60" rx="38" ry="16" transform="rotate(34 60 60)" />
-            <circle className="spacer-card__accent" cx="60" cy="60" r="3" />
-          </>
-        )}
-        {variant === "diamond" && (
-          <>
-            <path d="M60 24 96 60 60 96 24 60 60 24Z" />
-            <path d="M60 39 81 60 60 81 39 60 60 39Z" />
-            <circle className="spacer-card__accent" cx="60" cy="60" r="2.5" />
-          </>
-        )}
-        {variant === "rings" && (
-          <>
-            <circle cx="52" cy="60" r="28" />
-            <circle cx="68" cy="60" r="28" />
-            <circle className="spacer-card__accent" cx="60" cy="60" r="2.5" />
-          </>
-        )}
-        {variant === "grid" && Array.from({ length: 16 }, (_, index) => (
-          <circle key={index} className="spacer-card__dot" cx={42 + (index % 4) * 12} cy={42 + Math.floor(index / 4) * 12} r="1.4" />
-        ))}
-        {variant === "radial" && (
-          <>
-            <circle cx="60" cy="60" r="30" />
-            <path d="M60 20v80M20 60h80M32 32l56 56M88 32 32 88" />
-            <circle className="spacer-card__accent" cx="60" cy="60" r="3" />
-          </>
-        )}
-      </svg>
-    </div>
-  );
+/* ── Negative space ── */
+function SpacerCell() {
+  return <div className="spacer-card" aria-hidden="true" />;
 }
 
 /* ── Status ── */
 function StatusCell() {
+  return <div className="cell-info cell-status" aria-hidden="true" />;
+}
+
+function ISSPositionCell() {
+  const [iss, setIss] = useState<{
+    position: { latitude: number; longitude: number } | null;
+    status: "loading" | "live" | "offline";
+  }>({ position: null, status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+
+    const refreshPosition = async () => {
+      try {
+        const response = await fetch("/api/iss", { cache: "no-store" });
+        if (!response.ok) throw new Error("ISS position unavailable");
+        const data: { latitude: number; longitude: number } = await response.json();
+        if (
+          !Number.isFinite(data.latitude) || data.latitude < -90 || data.latitude > 90 ||
+          !Number.isFinite(data.longitude) || data.longitude < -180 || data.longitude > 180
+        ) {
+          throw new Error("Invalid ISS position");
+        }
+        if (active) setIss({ position: data, status: "live" });
+      } catch {
+        if (active) setIss((current) => ({ ...current, status: "offline" }));
+      } finally {
+        if (active) timer = window.setTimeout(refreshPosition, 5000);
+      }
+    };
+
+    void refreshPosition();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  const latitude = iss.position?.latitude;
+  const longitude = iss.position?.longitude;
+  const formatCoordinate = (value: number | undefined, positive: string, negative: string) =>
+    value === undefined ? "—" : `${Math.abs(value).toFixed(2)}° ${value >= 0 ? positive : negative}`;
+
   return (
-    <div className="cell-info cell-status">
-      <div className="status-dot" />
-      <h3>Available</h3>
-      <p>作品制作中・コラボ歓迎</p>
-    </div>
+    <section className="cell-info cell-iss" aria-label="International Space Station position">
+      <div className="cell-iss__eyebrow">
+        <span>ISS / LIVE POSITION</span>
+        <span className={`cell-iss__state${iss.status === "live" ? " is-live" : ""}`}>
+          <i aria-hidden="true" />{iss.status === "live" ? "LIVE" : iss.status === "loading" ? "SEARCHING" : "NO SIGNAL"}
+        </span>
+      </div>
+      <div className="cell-iss__map" role="img" aria-label="緯度と経度に基づくISSのおおよその位置">
+        <svg viewBox="0 0 360 180" preserveAspectRatio="none" aria-hidden="true">
+          <g className="cell-iss__graticule">
+            <path d="M0 45H360M0 90H360M0 135H360M90 0V180M180 0V180M270 0V180" />
+          </g>
+          <g className="cell-iss__land">
+            <path d="m28 39 19-17 31 3 17 13-5 17-19 8-10 18-16-6-8-16-14-5z" />
+            <path d="m92 91 19 3 13 17-5 20-13 28-8-19-8-23z" />
+            <path d="m145 40 22-13 27 4 14-7 25 9 20-3 27 12 25 4 18 13-11 12-21-2-16 10-18-6-18 8-19-9-17 5-14-14-18 2-12-14-22 1z" />
+            <path d="m174 80 19-8 21 10 8 19-13 31-13 17-8-19-10-22z" />
+            <path d="m273 119 20-6 17 9-7 13-21 4-14-9z" />
+            <path d="m62 20 11-12 16 4-4 9-13 5z" />
+          </g>
+        </svg>
+        {latitude !== undefined && longitude !== undefined && (
+          <span
+            className="cell-iss__marker"
+            style={{
+              left: `${((longitude + 180) / 360) * 100}%`,
+              top: `${((90 - latitude) / 180) * 100}%`,
+            }}
+          />
+        )}
+      </div>
+      <div className="cell-iss__coordinates">
+        <span>{formatCoordinate(latitude, "N", "S")}</span>
+        <span>{formatCoordinate(longitude, "E", "W")}</span>
+      </div>
+      <div className="cell-iss__footnote">EARTH ORBIT · REFRESHES EVERY 5 SEC</div>
+    </section>
   );
 }
 
 function CountdownCell() {
-  const [remaining, setRemaining] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [remaining, setRemaining] = useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+    progress: 0,
+    yearPercent: 0,
+    currentYear: 0,
+    nextYear: 0,
+  });
 
   useEffect(() => {
     const update = () => {
-      const milliseconds = Math.max(0, new Date(2027, 0, 1).getTime() - Date.now());
+      const now = Date.now();
+      const currentYear = new Date(now).getFullYear();
+      const nextYear = currentYear + 1;
+      const startOfYear = new Date(currentYear, 0, 1).getTime();
+      const startOfNextYear = new Date(nextYear, 0, 1).getTime();
+      const milliseconds = Math.max(0, startOfNextYear - now);
       const totalSeconds = Math.floor(milliseconds / 1000);
+      const progress = Math.min(100, Math.max(0, ((now - startOfYear) / (startOfNextYear - startOfYear)) * 100));
       setRemaining({
         days: Math.floor(totalSeconds / 86400),
         hours: Math.floor((totalSeconds % 86400) / 3600),
         minutes: Math.floor((totalSeconds % 3600) / 60),
         seconds: totalSeconds % 60,
+        progress,
+        yearPercent: Math.round(progress),
+        currentYear,
+        nextYear,
       });
     };
     update();
@@ -411,28 +515,40 @@ function CountdownCell() {
   }, []);
 
   return (
-    <div className="cell-info cell-countdown" aria-label={`2027年まであと${remaining.days}日`}>
-      <span className="cell-countdown__eyebrow">COUNTDOWN TO 2027</span>
-      <strong className="cell-countdown__days"><span>{remaining.days}</span><small>日</small></strong>
+    <div
+      className="cell-info cell-countdown"
+      aria-label={remaining.nextYear ? `${remaining.days} days until ${remaining.nextYear}` : "Countdown to New Year"}
+    >
+      <span className="cell-countdown__eyebrow">UNTIL {remaining.nextYear || "NEW YEAR"}</span>
+      <strong className="cell-countdown__days"><span>{remaining.days}</span><small>DAYS</small></strong>
       <span className="cell-countdown__time">
         {String(remaining.hours).padStart(2, "0")}:{String(remaining.minutes).padStart(2, "0")}:{String(remaining.seconds).padStart(2, "0")}
       </span>
+      <div className="cell-countdown__progress-label">
+        <span>YEAR ELAPSED</span>
+        <span>{remaining.yearPercent}%</span>
+      </div>
+      <div
+        className="cell-countdown__progress"
+        role="progressbar"
+        aria-label={`${remaining.yearPercent}% of ${remaining.currentYear || "the current year"} elapsed`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={remaining.yearPercent}
+      >
+        <span style={{ width: `${remaining.progress}%` }} />
+      </div>
+      <div className="cell-countdown__years" aria-hidden="true">
+        <span>{remaining.currentYear || "—"}</span>
+        <span>{remaining.nextYear || "—"}</span>
+      </div>
     </div>
   );
 }
 
 /* ── Quote ── */
 function QuoteCell() {
-  return (
-    <div className="cell-info cell-quote">
-      <blockquote>
-        コードは詩であり、
-        <br />
-        プログラミングは芸術である。
-      </blockquote>
-      <cite>— My Philosophy</cite>
-    </div>
-  );
+  return <div className="cell-info cell-quote" aria-hidden="true" />;
 }
 
 /* ── Brand ── */
@@ -440,7 +556,7 @@ function BrandCell({ variant }: { variant: string }) {
   return (
     <div className={`brand-cell brand-cell--${variant}`}>
       <div className="brand-cell__logo">
-        <Image src="/Logo.jpg" alt="Ryugen Logo" width={150} height={150} sizes="150px" style={{ objectFit: "cover" }} />
+        <Image src="/Logo.jpg" alt="Ryugen Logo" width={150} height={150} sizes="150px" style={{ objectFit: "cover" }} draggable={false} />
       </div>
       <div className="brand-cell__copy">
         <span className="cell-eyebrow">DESIGN / CODE / IMAGE</span>
