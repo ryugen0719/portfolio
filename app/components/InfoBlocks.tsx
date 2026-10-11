@@ -16,6 +16,8 @@ export const CellContent = memo(function CellContent({
   soundEnabled,
   brandVariant,
   presentation = "canvas",
+  spotlightOn = false,
+  onSpotlightToggle,
 }: {
   item: GridItem;
   imageSizes: string;
@@ -24,6 +26,8 @@ export const CellContent = memo(function CellContent({
   soundEnabled: boolean;
   brandVariant?: string;
   presentation?: "canvas" | "list";
+  spotlightOn?: boolean;
+  onSpotlightToggle?: () => void;
 }) {
   switch (item.type) {
     case "project":
@@ -43,7 +47,7 @@ export const CellContent = memo(function CellContent({
     case "spacer":
       return <SpacerCell />;
     case "status":
-      return <StatusCell />;
+      return <StatusCell isOn={spotlightOn} onToggle={onSpotlightToggle} presentation={presentation} />;
     case "countdown":
       return <CountdownCell />;
     case "iss":
@@ -390,13 +394,47 @@ function SpacerCell() {
 }
 
 /* ── Status ── */
-function StatusCell() {
-  return <div className="cell-info cell-status" aria-hidden="true" />;
+function StatusCell({
+  isOn,
+  onToggle,
+  presentation,
+}: {
+  isOn: boolean;
+  onToggle?: () => void;
+  presentation: "canvas" | "list";
+}) {
+  if (presentation === "list") return null;
+
+  return (
+    <button
+      type="button"
+      className={`cell-info cell-status cell-switch${isOn ? " is-on" : ""}`}
+      aria-pressed={isOn}
+      aria-label={isOn ? "ライトを消す" : "ライトを点ける"}
+      onClick={onToggle}
+    >
+      <span className="cell-switch__heading">
+        <span>DARKROOM / 01</span>
+        <span className="cell-switch__state"><i aria-hidden="true" />{isOn ? "ON" : "OFF"}</span>
+      </span>
+      <span className="cell-switch__plate" aria-hidden="true">
+        <span className="cell-switch__screw cell-switch__screw--top" />
+        <span className="cell-switch__screw cell-switch__screw--bottom" />
+        <span className={`cell-switch__rocker${isOn ? " is-on" : ""}`}>
+          <span className="cell-switch__rocker-mark">I</span>
+          <span className="cell-switch__rocker-indicator" />
+          <span className="cell-switch__rocker-mark">O</span>
+        </span>
+      </span>
+      <span className="cell-switch__label">{isOn ? "LIGHT ON" : "LIGHT OFF"}</span>
+      <span className="cell-switch__hint">{isOn ? "PRESS TO RESTORE · ESC" : "PRESS TO EXPLORE"}</span>
+    </button>
+  );
 }
 
 function ISSPositionCell() {
   const [iss, setIss] = useState<{
-    position: { latitude: number; longitude: number } | null;
+    position: { latitude: number; longitude: number; altitude: number; velocity: number; timestamp: number } | null;
     status: "loading" | "live" | "offline";
   }>({ position: null, status: "loading" });
 
@@ -408,10 +446,13 @@ function ISSPositionCell() {
       try {
         const response = await fetch("/api/iss", { cache: "no-store" });
         if (!response.ok) throw new Error("ISS position unavailable");
-        const data: { latitude: number; longitude: number } = await response.json();
+        const data: { latitude: number; longitude: number; altitude: number; velocity: number; timestamp: number } = await response.json();
         if (
           !Number.isFinite(data.latitude) || data.latitude < -90 || data.latitude > 90 ||
-          !Number.isFinite(data.longitude) || data.longitude < -180 || data.longitude > 180
+          !Number.isFinite(data.longitude) || data.longitude < -180 || data.longitude > 180 ||
+          !Number.isFinite(data.altitude) || data.altitude <= 0 ||
+          !Number.isFinite(data.velocity) || data.velocity <= 0 ||
+          !Number.isFinite(data.timestamp) || data.timestamp <= 0
         ) {
           throw new Error("Invalid ISS position");
         }
@@ -444,19 +485,7 @@ function ISSPositionCell() {
         </span>
       </div>
       <div className="cell-iss__map" role="img" aria-label="緯度と経度に基づくISSのおおよその位置">
-        <svg viewBox="0 0 360 180" preserveAspectRatio="none" aria-hidden="true">
-          <g className="cell-iss__graticule">
-            <path d="M0 45H360M0 90H360M0 135H360M90 0V180M180 0V180M270 0V180" />
-          </g>
-          <g className="cell-iss__land">
-            <path d="m28 39 19-17 31 3 17 13-5 17-19 8-10 18-16-6-8-16-14-5z" />
-            <path d="m92 91 19 3 13 17-5 20-13 28-8-19-8-23z" />
-            <path d="m145 40 22-13 27 4 14-7 25 9 20-3 27 12 25 4 18 13-11 12-21-2-16 10-18-6-18 8-19-9-17 5-14-14-18 2-12-14-22 1z" />
-            <path d="m174 80 19-8 21 10 8 19-13 31-13 17-8-19-10-22z" />
-            <path d="m273 119 20-6 17 9-7 13-21 4-14-9z" />
-            <path d="m62 20 11-12 16 4-4 9-13 5z" />
-          </g>
-        </svg>
+        <div className="cell-iss__map-land" aria-hidden="true" />
         {latitude !== undefined && longitude !== undefined && (
           <span
             className="cell-iss__marker"
@@ -468,10 +497,24 @@ function ISSPositionCell() {
         )}
       </div>
       <div className="cell-iss__coordinates">
-        <span>{formatCoordinate(latitude, "N", "S")}</span>
-        <span>{formatCoordinate(longitude, "E", "W")}</span>
+        <span><small>LAT</small>{formatCoordinate(latitude, "N", "S")}</span>
+        <span><small>LON</small>{formatCoordinate(longitude, "E", "W")}</span>
       </div>
-      <div className="cell-iss__footnote">EARTH ORBIT · REFRESHES EVERY 5 SEC</div>
+      {iss.position && (
+        <div className="cell-iss__telemetry">
+          <span><small>ALTITUDE</small>{iss.position.altitude.toFixed(1)} km</span>
+          <span><small>VELOCITY</small>{Math.round(iss.position.velocity).toLocaleString("en-US")} km/h</span>
+        </div>
+      )}
+      <div className="cell-iss__footnote">
+        {iss.position ? (
+          <time dateTime={new Date(iss.position.timestamp * 1000).toISOString()}>
+            UPDATED {new Date(iss.position.timestamp * 1000).toISOString().slice(11, 19)} UTC · 5 SEC
+          </time>
+        ) : (
+          "EARTH ORBIT · REFRESHES EVERY 5 SEC"
+        )}
+      </div>
     </section>
   );
 }

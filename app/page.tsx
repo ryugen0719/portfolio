@@ -209,6 +209,7 @@ const CONTENT_W = COLS * STEP_X;
 const CONTENT_H = ROWS * STEP_Y;
 const FRICTION = 0.94;
 const DRAG_FRICTION = 0.975;
+const MOBILE_DRAG_FRICTION = 0.975;
 const WHEEL_FRICTION = 0.965;
 const WHEEL_SPEED = 1.2;
 const MIN_CANVAS_ZOOM = 0.55;
@@ -301,6 +302,8 @@ function GalleryCursor() {
     const updatePointer = (event: PointerEvent) => {
       targetX = event.clientX;
       targetY = event.clientY;
+      document.documentElement.style.setProperty("--darkroom-x", `${targetX}px`);
+      document.documentElement.style.setProperty("--darkroom-y", `${targetY}px`);
       const deltaX = hasPosition ? targetX - lastEventX : 0;
       const deltaY = hasPosition ? targetY - lastEventY : 0;
       lastEventX = targetX;
@@ -402,6 +405,8 @@ export default function PortfolioPage() {
   const [categoryTransitionRun, setCategoryTransitionRun] = useState(0);
   const [vpSize, setVpSize] = useState({ w: 1920, h: 1080 });
   const [activeProject, setActiveProject] = useState<ProjectItem | null>(null);
+  const [spotlightModeOn, setSpotlightModeOn] = useState(false);
+  const switchSoundRef = useRef<HTMLAudioElement>(null);
   const [starfallActive, setStarfallActive] = useState(false);
   const [starfallRun, setStarfallRun] = useState(0);
   const starfallTimerRef = useRef<number | null>(null);
@@ -410,6 +415,35 @@ export default function PortfolioPage() {
   const filteredGrid = useMemo(() => buildFilteredGrid(displayCategory), [displayCategory]);
   const mobileItems = useMemo(() => buildMobileItems(displayCategory), [displayCategory]);
   const isMobile = isMobileViewport && showMobileList;
+
+  const toggleSpotlightMode = useCallback(() => {
+    const sound = switchSoundRef.current;
+    if (sound) {
+      if (sound.readyState > 0) sound.currentTime = 0;
+      sound.volume = 0.34;
+      void sound.play().catch(() => undefined);
+    }
+    setSpotlightModeOn((isOn) => !isOn);
+  }, []);
+
+  useEffect(() => {
+    const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
+    if (!spotlightModeOn || !finePointer.matches || isMobileViewport || showMobileList) {
+      document.body.classList.remove("darkroom-active");
+      return;
+    }
+
+    document.body.classList.add("darkroom-active");
+    const turnOffWithEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSpotlightModeOn(false);
+    };
+    window.addEventListener("keydown", turnOffWithEscape);
+
+    return () => {
+      document.body.classList.remove("darkroom-active");
+      window.removeEventListener("keydown", turnOffWithEscape);
+    };
+  }, [spotlightModeOn, isMobileViewport, showMobileList]);
 
   useEffect(() => {
     const canvasMode = isMobileViewport && !showMobileList;
@@ -935,9 +969,9 @@ export default function PortfolioPage() {
         dragMovedRef.current = false;
         suppressClickTimerRef.current = null;
       }, 250);
-      if (!hadPinch) startMomentum(DRAG_FRICTION);
+      if (!hadPinch) startMomentum(isMobileViewport ? MOBILE_DRAG_FRICTION : DRAG_FRICTION);
     }
-  }, [startMomentum]);
+  }, [isMobileViewport, startMomentum]);
 
   /* ── Calculate visible cells ── */
   const cam = cameraRef.current;
@@ -1066,6 +1100,7 @@ export default function PortfolioPage() {
 
           {/* Vignette overlay for edge darkening */}
           <div className="vignette" />
+          {spotlightModeOn && !isMobileViewport && !showMobileList && <div className="darkroom-overlay" aria-hidden="true" />}
           <div className="topbar-shade" aria-hidden="true" />
 
           {!isMobile && <div className="canvas-label canvas-label--left">
@@ -1106,6 +1141,12 @@ export default function PortfolioPage() {
             ref={uiSoundRef}
             className="ambient-audio-source"
             src="/audio/juniorsoundays-ui-sound-56-527824.mp3"
+            preload="auto"
+          />
+          <audio
+            ref={switchSoundRef}
+            className="ambient-audio-source"
+            src="/audio/light-switch.mp3"
             preload="auto"
           />
           {!isMobile && <button
@@ -1193,7 +1234,13 @@ export default function PortfolioPage() {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
-            onLostPointerCapture={onPointerUp}
+          onLostPointerCapture={(event) => {
+            // Pointer capture can move from a child to this canvas once dragging
+            // starts. Ignore the bubbled loss from that child; only end the drag
+            // if the canvas itself loses capture.
+            if (event.target !== event.currentTarget) return;
+            onPointerUp(event);
+          }}
             onDragStart={(event) => event.preventDefault()}
             onClickCapture={(event) => {
               if (!suppressClickRef.current) return;
@@ -1224,7 +1271,7 @@ export default function PortfolioPage() {
                     }}
                   >
                     <div className="canvas-cell__reveal">
-                      <CellContent item={item} imageSizes={`${Math.ceil(w)}px`} onProjectSelect={selectProject} audioAnalyser={audioAnalyser} soundEnabled={soundEnabled} brandVariant={displayCategory} />
+                      <CellContent item={item} imageSizes={`${Math.ceil(w)}px`} onProjectSelect={selectProject} audioAnalyser={audioAnalyser} soundEnabled={soundEnabled} brandVariant={displayCategory} spotlightOn={spotlightModeOn} onSpotlightToggle={toggleSpotlightMode} />
                     </div>
                   </div>
                 ))}
@@ -1253,6 +1300,8 @@ export default function PortfolioPage() {
                         audioAnalyser={audioAnalyser}
                         soundEnabled={soundEnabled}
                         brandVariant={displayCategory}
+                        spotlightOn={spotlightModeOn}
+                        onSpotlightToggle={toggleSpotlightMode}
                       />
                     </div>
                   </div>
@@ -1288,6 +1337,8 @@ export default function PortfolioPage() {
                           soundEnabled={soundEnabled}
                           brandVariant={displayCategory}
                           presentation="list"
+                          spotlightOn={spotlightModeOn}
+                          onSpotlightToggle={toggleSpotlightMode}
                         />
                       </article>
                     ))}
